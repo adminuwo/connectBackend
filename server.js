@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const axios = require('axios');
 
 // Configure storage for uploads
 const storage = multer.diskStorage({
@@ -375,7 +376,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             
             // 3. Send response via Interakt API
             try {
-                const axios = require('axios');
                 await axios.post('https://api.interakt.ai/v1/public/message/', {
                     full_phone_number: customerPhone,
                     type: 'Text',
