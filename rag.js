@@ -165,6 +165,36 @@ class SimpleRAG {
         }
     }
 
+    async query(clientId, userQuery) {
+        if (!this.openai) return "I'm sorry, my AI features are currently offline.";
+        
+        try {
+            const context = await this.search(clientId, userQuery);
+            const systemPrompt = `You are a helpful AI assistant for a business. 
+            Use the following context from the business's knowledge base to answer the customer.
+            If the answer is not in the context, provide a polite general response based on your knowledge.
+            Keep the tone professional and friendly.
+
+            CONTEXT:
+            ${context || 'No specific context found.'}
+            `;
+
+            const completion = await this.openai.chat.completions.create({
+                model: "gpt-4o-mini",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userQuery }
+                ],
+                temperature: 0.7
+            });
+
+            return completion.choices[0].message.content;
+        } catch (err) {
+            console.error('[RAG QUERY ERROR]', err.message);
+            return "I'm having trouble processing that right now. Please try again later.";
+        }
+    }
+
     // Add a file and re-index for a client
     async addFile(clientId, filename, content) {
         const clientPath = path.join(this.baseKbPath, clientId);
