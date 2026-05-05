@@ -1,19 +1,27 @@
+# Use an official Node runtime as a parent image
 FROM node:20-slim
 
+# Create and change to the app directory
 WORKDIR /app
 
-# Install dependencies first for better caching
+# Copy application dependency manifests to the container image.
+# A wildcard is used to ensure both package.json and package-lock.json are copied.
+# Copying this separately prevents re-running npm install on every code change.
 COPY package*.json ./
+
+# Install production dependencies.
 RUN npm install --production
 
-# Copy application source
+# Copy local code to the container image.
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p uploads knowledge_base
+# Set environment variables
+ENV PORT=8080
+ENV NODE_ENV=production
 
-# Expose the application port
+# Expose the port the app runs on
 EXPOSE 8080
 
-# Start the application
-CMD ["npm", "start"]
+# Start the application. 
+# Using exec form of CMD for better signal handling
+CMD ["node", "server.js"]

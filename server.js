@@ -622,9 +622,12 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ [SUCCESS] Server is booting up...`);
     console.log(`🌐 Listening on: 0.0.0.0:${PORT}`);
     
-    // Call sync after everything is initialized
-    console.log('🔄 Starting Knowledge Base sync...');
-    syncKnowledgeBase().catch(err => {
-        console.error('❌ [SYNC ERROR] Sync failed but server is still running:', err.message);
-    });
+    // DELAYED SYNC: This ensures Cloud Run sees the server as HEALTHY immediately
+    // before the potentially heavy indexing process starts.
+    setTimeout(() => {
+        console.log('🔄 [ASYNC] Starting Knowledge Base sync in background...');
+        syncKnowledgeBase().catch(err => {
+            console.error('❌ [SYNC ERROR] Background sync failed:', err.message);
+        });
+    }, 5000); 
 });
