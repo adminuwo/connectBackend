@@ -349,8 +349,10 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         // If it's a message from the bot/me, we skip processing to avoid loops
         if (message.from_me) return res.sendStatus(200);
 
-        // Interakt can send phone/text in different fields depending on webhook version
-        const customerPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
+        // Normalize phone number by removing non-digits to prevent duplicates (+91... vs 91...)
+        const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
+        const customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
+
         const text = message.text || message.message || "Media/Unsupported message";
 
         if (customerPhone === "unknown") {
