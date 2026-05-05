@@ -43,19 +43,19 @@ const INTERAKT_KEY = process.env.INTERAKT_API_KEY || process.env.INTERAKT_APT_KE
 const { OpenAI } = require('openai');
 const openai = OPENAI_KEY ? new OpenAI({ apiKey: OPENAI_KEY }) : null;
 
-if (!openai) {
-    console.error('⚠️ [WARNING] OpenAI Key not found (Checked API_KEY and APT_KEY). AI features disabled.');
-}
+console.log(`🤖 [AI STATUS] OpenAI Initialized: ${!!openai} (${process.env.OPENAI_API_KEY ? 'Using OPENAI_API_KEY' : (process.env.OPENAI_APT_KEY ? 'Using OPENAI_APT_KEY' : 'KEY MISSING')})`);
 
 const SimpleRAG = require('./rag');
 const rag = new SimpleRAG(openai);
-const gcs = require('./gcs'); 
+const gcs = require('./gcs');
+
+console.log(`☁️ [GCS STATUS] GCS Active: ${gcs.isGcsActive}`);
 
 // Import database
 const { Client, Ticket, Chat, OTP, isLocal } = require('./database');
 
 app.use(cors({
-    origin: '*', 
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     credentials: true
@@ -68,11 +68,11 @@ app.use(express.json());
 app.get('/uploads/logos/:filename', async (req, res) => {
     const { filename } = req.params;
     const localPath = path.join(__dirname, 'uploads', 'logos', filename);
-    
+
     if (fs.existsSync(localPath)) return res.sendFile(localPath);
-    
+
     console.log(`🔍 [FALLBACK] Logo ${filename} missing locally. GCS Active: ${gcs.isGcsActive}`);
-    
+
     if (gcs.isGcsActive) {
         try {
             console.log(`📥 [FALLBACK] Attempting GCS download for logo: ${filename}`);
@@ -88,17 +88,17 @@ app.get('/uploads/logos/:filename', async (req, res) => {
         }
     }
     // Final fallback: serve a default blank logo if nothing works
-    res.redirect('https://cdn-icons-png.flaticon.com/512/3135/3135715.png'); 
+    res.redirect('https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
 });
 
 app.get('/uploads/:clientId/:filename', async (req, res) => {
     const { clientId, filename } = req.params;
     const localPath = path.join(__dirname, 'uploads', clientId, filename);
-    
+
     if (fs.existsSync(localPath)) return res.sendFile(localPath);
-    
+
     console.log(`🔍 [FALLBACK] File ${filename} missing locally for client ${clientId}. GCS Active: ${gcs.isGcsActive}`);
-    
+
     if (gcs.isGcsActive) {
         try {
             console.log(`📥 [FALLBACK] Attempting GCS download for client ${clientId} file: ${filename}`);
@@ -179,7 +179,7 @@ app.post('/api/auth/register', async (req, res) => {
     try {
         const validOtp = await OTP.findOne({ email, otp });
         if (!validOtp) return res.status(400).json({ error: 'Invalid or expired OTP' });
-        
+
         const existing = await Client.findOne({ email });
         if (existing) return res.status(400).json({ error: 'Email already registered' });
 
@@ -229,7 +229,7 @@ app.post('/api/client/:id/upload', upload.single('file'), async (req, res) => {
         const fileName = req.file.filename;
         const docs = client.documents || [];
         docs.push(fileName);
-        
+
         await Client.findByIdAndUpdate(req.params.id, { documents: docs });
 
         const clientId = req.params.id;
@@ -250,7 +250,7 @@ app.post('/api/client/:id/upload-logo', logoUpload.single('logo'), async (req, r
     try {
         const logoUrl = `/uploads/logos/${req.file.filename}`;
         await Client.findByIdAndUpdate(req.params.id, { logoUrl });
-        
+
         if (gcs.isGcsActive) {
             await gcs.uploadToBucket('logos', req.file.filename, req.file.path);
         }
@@ -297,10 +297,10 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
         const client = await Client.findById(req.params.id);
         const docs = (client.documents || []).filter(d => d !== req.params.filename);
         await Client.findByIdAndUpdate(req.params.id, { documents: docs });
-        
+
         const localPath = path.join(__dirname, 'knowledge_base', req.params.id, req.params.filename);
         if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
-        
+
         if (gcs.isGcsActive) await gcs.deleteFromBucket(req.params.id, req.params.filename);
         if (openai) await rag.init();
         res.json({ success: true });
@@ -383,8 +383,8 @@ app.get('/api/admin/stats', async (req, res) => {
         const clients = await Client.find({});
         const approved = clients.filter(c => c.status === 'approved');
         const totalDocs = clients.reduce((acc, c) => acc + (c.documents || []).length, 0);
-        res.json({ 
-            totalClients: clients.length, 
+        res.json({
+            totalClients: clients.length,
             pendingApprovals: clients.filter(c => c.status === 'pending').length,
             approvedClients: approved.length,
             totalDocs: totalDocs
@@ -404,7 +404,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             console.log(`❌ [WEBHOOK] Client ${clientId} not found in DB`);
             return res.sendStatus(200);
         }
-        
+
         console.log(`📡 [WEBHOOK] Processing for ${client.name}. Bot Enabled: ${client.botEnabled}`);
         if (!client.botEnabled) return res.sendStatus(200);
 
@@ -413,12 +413,12 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             console.log('ℹ️ [WEBHOOK] No message object in payload');
             return res.sendStatus(200);
         }
-        
+
         if (message.from_me) return res.sendStatus(200);
 
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
         let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
-        
+
         // Normalize: if 10 digits, assume India and add 91. 
         if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
         // Always ensure '+' prefix for consistency in DB and Dashboard
@@ -448,13 +448,13 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             console.log('🤖 [WEBHOOK] Calling RAG Query...');
             const response = await rag.query(clientId, text);
             console.log(`✨ [WEBHOOK] AI Response generated: "${response.substring(0, 30)}..."`);
-            
+
             // 3. Send response via Interakt API
             try {
                 console.log('📤 [WEBHOOK] Sending to Interakt API...');
-                
+
                 const formattedPhone = customerPhone;
-                
+
                 console.log(`📱 [WEBHOOK] Target Phone: ${formattedPhone}`);
 
                 // Try with the structure that got past the "data is required" check
@@ -474,7 +474,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 await chat.save();
             } catch (apiErr) {
                 console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
-                
+
                 // Final fallback attempt with the other common structure
                 if (apiErr.response?.status === 400) {
                     console.log('🔄 [WEBHOOK] Retrying with flat structure...');
@@ -510,7 +510,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 // START SERVER
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 [BACKEND READY] Listening on 0.0.0.0:${PORT}`);
-    
+
     // Background Init
     setTimeout(() => {
         syncKnowledgeBase().catch(e => console.error('Background Error:', e));
