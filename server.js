@@ -66,25 +66,51 @@ app.use(express.json());
 
 // Serving Static Files with GCS Fallback logic
 app.get('/uploads/logos/:filename', async (req, res) => {
-    const localPath = path.join(__dirname, 'uploads', 'logos', req.params.filename);
+    const { filename } = req.params;
+    const localPath = path.join(__dirname, 'uploads', 'logos', filename);
+    
     if (fs.existsSync(localPath)) return res.sendFile(localPath);
+    
+    console.log(`🔍 [FALLBACK] Logo ${filename} missing locally. GCS Active: ${gcs.isGcsActive}`);
+    
     if (gcs.isGcsActive) {
         try {
-            await gcs.downloadFromBucket('logos', req.params.filename, localPath);
-            if (fs.existsSync(localPath)) return res.sendFile(localPath);
-        } catch (e) {}
+            console.log(`📥 [FALLBACK] Attempting GCS download for logo: ${filename}`);
+            await gcs.downloadFromBucket('logos', filename, localPath);
+            if (fs.existsSync(localPath)) {
+                console.log(`✅ [FALLBACK] Logo ${filename} recovered from GCS.`);
+                return res.sendFile(localPath);
+            } else {
+                console.warn(`⚠️ [FALLBACK] Logo ${filename} not found in GCS bucket.`);
+            }
+        } catch (e) {
+            console.error(`❌ [FALLBACK] Logo recovery failed: ${e.message}`);
+        }
     }
     res.status(404).send('Not found');
 });
 
 app.get('/uploads/:clientId/:filename', async (req, res) => {
-    const localPath = path.join(__dirname, 'uploads', req.params.clientId, req.params.filename);
+    const { clientId, filename } = req.params;
+    const localPath = path.join(__dirname, 'uploads', clientId, filename);
+    
     if (fs.existsSync(localPath)) return res.sendFile(localPath);
+    
+    console.log(`🔍 [FALLBACK] File ${filename} missing locally for client ${clientId}. GCS Active: ${gcs.isGcsActive}`);
+    
     if (gcs.isGcsActive) {
         try {
-            await gcs.downloadFromBucket(req.params.clientId, req.params.filename, localPath);
-            if (fs.existsSync(localPath)) return res.sendFile(localPath);
-        } catch (e) {}
+            console.log(`📥 [FALLBACK] Attempting GCS download for client ${clientId} file: ${filename}`);
+            await gcs.downloadFromBucket(clientId, filename, localPath);
+            if (fs.existsSync(localPath)) {
+                console.log(`✅ [FALLBACK] File ${filename} recovered from GCS.`);
+                return res.sendFile(localPath);
+            } else {
+                console.warn(`⚠️ [FALLBACK] File ${filename} not found in GCS bucket for client ${clientId}.`);
+            }
+        } catch (e) {
+            console.error(`❌ [FALLBACK] File recovery failed: ${e.message}`);
+        }
     }
     res.status(404).send('Not found');
 });
