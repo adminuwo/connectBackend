@@ -9,11 +9,16 @@ const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // Initialize OpenAI and RAG
 const { OpenAI } = require('openai');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+if (!openai) {
+    console.error('⚠️ [CRITICAL] OPENAI_API_KEY is missing in environment variables!');
+}
+
 const SimpleRAG = require('./rag');
 const rag = new SimpleRAG(openai);
 const gcs = require('./gcs'); // Added GCP Storage utility
@@ -58,7 +63,15 @@ async function syncKnowledgeBase() {
     }
     
     // Now initialize RAG (it will load all files from local folders)
-    await rag.init();
+    if (openai) {
+        try {
+            await rag.init();
+        } catch (err) {
+            console.error('❌ [RAG] Initialization failed:', err.message);
+        }
+    } else {
+        console.warn('⚠️ [RAG] OpenAI Key missing. RAG will be inactive.');
+    }
 }
 // Removed early call from here to fix ReferenceError
 

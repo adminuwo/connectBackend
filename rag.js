@@ -81,6 +81,12 @@ class SimpleRAG {
         for (let i = 0; i < rawChunks.length; i++) {
             const chunk = rawChunks[i];
             if (chunk.trim().length === 0) continue;
+            
+            if (!this.openai) {
+                console.warn(`[RAG] ⚠️ Skipping embedding for chunk ${i+1}: OpenAI client not initialized.`);
+                continue;
+            }
+
             try {
                 process.stdout.write(`[RAG] 🧠 Generating embedding ${i+1}/${rawChunks.length}... \r`);
                 const embedding = await this.getEmbedding(chunk);
