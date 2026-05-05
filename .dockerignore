@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.env
+uploads
+knowledge_base
+*.json
+!package.json
+!package-lock.json
+# Keep JSON databases out of image, they should be mounted as volumes if using local mode
+clients.json
+otps.json
+tickets.json
+chats.json
+.git
+.gitignore
