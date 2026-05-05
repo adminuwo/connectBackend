@@ -3,6 +3,33 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const multer = require('multer');
+
+// Configure storage for uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const { clientId } = req.params;
+        const dir = path.join(__dirname, 'uploads', clientId || 'general');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+const upload = multer({ storage });
+const logoUpload = multer({
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => {
+            const dir = path.join(__dirname, 'uploads', 'logos');
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            cb(null, dir);
+        },
+        filename: (req, file, cb) => {
+            cb(null, `logo-${req.params.id}-${Date.now()}${path.extname(file.originalname)}`);
+        }
+    })
+});
 
 const app = express();
 // Priority: process.env.PORT -> .env PORT -> 8080
@@ -80,12 +107,281 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// (Other routes kept minimal for stability)
+
+app.post('/api/auth/send-otp', async (req, res) => {
+    const { email } = req.body;
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    try {
+        await OTP.deleteOne({ email });
+        const newOtp = OTP.new ? OTP.new({ email, otp }) : new OTP({ email, otp });
+        await newOtp.save();
+        console.log(`[OTP] Sent to ${email}: ${otp}`);
+        res.json({ success: true, message: 'OTP sent' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/auth/register', async (req, res) => {
+    const { name, email, password, otp } = req.body;
+    try {
+        const validOtp = await OTP.findOne({ email, otp });
+        if (!validOtp) return res.status(400).json({ error: 'Invalid or expired OTP' });
+        
+        const existing = await Client.findOne({ email });
+        if (existing) return res.status(400).json({ error: 'Email already registered' });
+
+        const client = Client.new ? Client.new({ name, email, password }) : new Client({ name, email, password });
+        await client.save();
+        await OTP.deleteOne({ email });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- CLIENT ROUTES ---
+app.get('/api/client/:id', async (req, res) => {
+    try {
+        const client = await Client.findById(req.params.id);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+        res.json({
+            ...client.toObject ? client.toObject() : client,
+            id: client._id || client.id,
+            documentCount: (client.documents || []).length
+        });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/config', async (req, res) => {
+    try {
+        const { whatsappNumber, apiKey } = req.body;
+        await Client.findByIdAndUpdate(req.params.id, { whatsappNumber, apiKey });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/toggle-bot', async (req, res) => {
+    try {
+        const { enabled } = req.body;
+        const client = await Client.findById(req.params.id);
+        if (enabled && (!client.whatsappNumber || !client.apiKey)) {
+            return res.status(400).json({ error: 'WhatsApp setup incomplete' });
+        }
+        await Client.findByIdAndUpdate(req.params.id, { botEnabled: enabled });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/upload', upload.single('file'), async (req, res) => {
+    try {
+        const client = await Client.findById(req.params.id);
+        const fileName = req.file.filename;
+        const docs = client.documents || [];
+        docs.push(fileName);
+        
+        await Client.findByIdAndUpdate(req.params.id, { documents: docs });
+
+        const clientId = req.params.id;
+        const clientKbDir = path.join(__dirname, 'knowledge_base', clientId);
+        if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
+        fs.copyFileSync(req.file.path, path.join(clientKbDir, fileName));
+
+        if (gcs.isGcsActive) {
+            await gcs.uploadToBucket(clientId, req.file.path, fileName);
+        }
+
+        if (openai) await rag.init();
+        res.json({ success: true, fileName });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/upload-logo', logoUpload.single('logo'), async (req, res) => {
+    try {
+        const logoUrl = `/uploads/logos/${req.file.filename}`;
+        await Client.findByIdAndUpdate(req.params.id, { logoUrl });
+        res.json({ success: true, logoUrl });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/update-profile', async (req, res) => {
+    try {
+        const { name } = req.body;
+        await Client.findByIdAndUpdate(req.params.id, { name });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/delete-whatsapp', async (req, res) => {
+    try {
+        await Client.findByIdAndUpdate(req.params.id, { whatsappNumber: '', apiKey: '', botEnabled: false });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/deactivate', async (req, res) => {
+    try {
+        await Client.findByIdAndDelete(req.params.id);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/client/:clientId/chats', async (req, res) => {
+    try {
+        const chats = await Chat.find({ clientId: req.params.clientId });
+        const chatMap = {};
+        chats.forEach(c => {
+            chatMap[c.customerPhone] = c.messages;
+        });
+        res.json(chatMap);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/client/:id/documents/:filename', async (req, res) => {
+    try {
+        const client = await Client.findById(req.params.id);
+        const docs = (client.documents || []).filter(d => d !== req.params.filename);
+        await Client.findByIdAndUpdate(req.params.id, { documents: docs });
+        
+        const localPath = path.join(__dirname, 'knowledge_base', req.params.id, req.params.filename);
+        if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+        
+        if (gcs.isGcsActive) await gcs.deleteFromBucket(req.params.id, req.params.filename);
+        if (openai) await rag.init();
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/client/:clientId/support', async (req, res) => {
+    try {
+        const ticket = await Ticket.findOne({ clientId: req.params.clientId });
+        res.json(ticket || { messages: [] });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/support/send', async (req, res) => {
+    const { clientId, clientName, message } = req.body;
+    try {
+        let ticket = await Ticket.findOne({ clientId });
+        if (!ticket) {
+            ticket = Ticket.new ? Ticket.new({ clientId, clientName }) : new Ticket({ clientId, clientName });
+        }
+        ticket.messages.push({ sender: 'client', text: message });
+        ticket.lastUpdate = new Date();
+        ticket.status = 'open';
+        await ticket.save();
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- ADMIN ROUTES ---
+app.get('/api/admin/clients', async (req, res) => {
+    try {
+        const clients = await Client.find({ role: { $ne: 'admin' } });
+        res.json(clients.map(c => ({
+            ...c.toObject ? c.toObject() : c,
+            id: c._id || c.id,
+            documentCount: (c.documents || []).length
+        })));
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin/clients/:id/approve', async (req, res) => {
+    try {
+        await Client.findByIdAndUpdate(req.params.id, { status: 'approved' });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/admin/clients/:id', async (req, res) => {
+    try {
+        await Client.findByIdAndDelete(req.params.id);
+        await Ticket.deleteMany({ clientId: req.params.id });
+        await Chat.deleteMany({ clientId: req.params.id });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/support/tickets', async (req, res) => {
+    try {
+        const tickets = await Ticket.find({});
+        res.json(tickets.map(t => ({
+            ...t.toObject ? t.toObject() : t,
+            id: t._id || t.id
+        })));
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin/support/reply', async (req, res) => {
+    const { ticketId, message } = req.body;
+    try {
+        const ticket = await Ticket.findById(ticketId);
+        ticket.messages.push({ sender: 'admin', text: message });
+        ticket.lastUpdate = new Date();
+        await ticket.save();
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/admin/stats', async (req, res) => {
     try {
         const clients = await Client.find({});
-        res.json({ totalClients: clients.length, pendingApprovals: clients.filter(c => c.status === 'pending').length });
+        const approved = clients.filter(c => c.status === 'approved');
+        const totalDocs = clients.reduce((acc, c) => acc + (c.documents || []).length, 0);
+        res.json({ 
+            totalClients: clients.length, 
+            pendingApprovals: clients.filter(c => c.status === 'pending').length,
+            approvedClients: approved.length,
+            totalDocs: totalDocs
+        });
     } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- WEBHOOK FOR INTERAKT ---
+app.post('/webhook/interakt/:clientId', async (req, res) => {
+    const { clientId } = req.params;
+    const body = req.body;
+    console.log(`[WEBHOOK] Received from ${clientId}:`, JSON.stringify(body));
+
+    try {
+        const client = await Client.findById(clientId);
+        if (!client || !client.botEnabled) return res.sendStatus(200);
+
+        const message = body.data?.message;
+        if (!message || message.from_me) return res.sendStatus(200);
+
+        const customerPhone = message.customer_number;
+        const text = message.text;
+
+        // 1. Log customer message
+        let chat = await Chat.findOne({ clientId, customerPhone });
+        if (!chat) {
+            chat = Chat.new ? Chat.new({ clientId, customerPhone }) : new Chat({ clientId, customerPhone });
+        }
+        chat.messages.push({ sender: 'customer', text });
+        chat.lastUpdate = new Date();
+        await chat.save();
+
+        // 2. Get AI Response
+        if (openai) {
+            const response = await rag.query(clientId, text);
+            
+            // 3. Send response via Interakt API
+            const axios = require('axios');
+            await axios.post('https://api.interakt.ai/v1/public/message/', {
+                full_phone_number: customerPhone,
+                type: 'Text',
+                message: response
+            }, {
+                headers: { 'Authorization': `Basic ${client.apiKey}` }
+            });
+
+            // 4. Log bot message
+            chat.messages.push({ sender: 'bot', text: response });
+            await chat.save();
+        }
+
+        res.sendStatus(200);
+    } catch (err) {
+        console.error('[WEBHOOK ERROR]', err.message);
+        res.sendStatus(200);
+    }
 });
 
 // START SERVER
