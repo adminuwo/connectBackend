@@ -1,5 +1,5 @@
-# Use an official Node runtime as a parent image
-FROM node:20-slim
+# Use full Node runtime (not slim) to ensure all system libraries are present
+FROM node:20
 
 # Create and change to the app directory
 WORKDIR /app
