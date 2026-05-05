@@ -63,6 +63,32 @@ app.use(cors({
 app.options(/.*/, cors());
 
 app.use(express.json());
+
+// Serving Static Files with GCS Fallback logic
+app.get('/uploads/logos/:filename', async (req, res) => {
+    const localPath = path.join(__dirname, 'uploads', 'logos', req.params.filename);
+    if (fs.existsSync(localPath)) return res.sendFile(localPath);
+    if (gcs.isGcsActive) {
+        try {
+            await gcs.downloadFromBucket('logos', req.params.filename, localPath);
+            if (fs.existsSync(localPath)) return res.sendFile(localPath);
+        } catch (e) {}
+    }
+    res.status(404).send('Not found');
+});
+
+app.get('/uploads/:clientId/:filename', async (req, res) => {
+    const localPath = path.join(__dirname, 'uploads', req.params.clientId, req.params.filename);
+    if (fs.existsSync(localPath)) return res.sendFile(localPath);
+    if (gcs.isGcsActive) {
+        try {
+            await gcs.downloadFromBucket(req.params.clientId, req.params.filename, localPath);
+            if (fs.existsSync(localPath)) return res.sendFile(localPath);
+        } catch (e) {}
+    }
+    res.status(404).send('Not found');
+});
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Simple Health Check for Cloud Run
@@ -185,7 +211,7 @@ app.post('/api/client/:id/upload', upload.single('file'), async (req, res) => {
         fs.copyFileSync(req.file.path, path.join(clientKbDir, fileName));
 
         if (gcs.isGcsActive) {
-            await gcs.uploadToBucket(clientId, req.file.path, fileName);
+            await gcs.uploadToBucket(clientId, fileName, req.file.path);
         }
 
         if (openai) await rag.init();
@@ -197,6 +223,11 @@ app.post('/api/client/:id/upload-logo', logoUpload.single('logo'), async (req, r
     try {
         const logoUrl = `/uploads/logos/${req.file.filename}`;
         await Client.findByIdAndUpdate(req.params.id, { logoUrl });
+        
+        if (gcs.isGcsActive) {
+            await gcs.uploadToBucket('logos', req.file.filename, req.file.path);
+        }
+
         res.json({ success: true, logoUrl });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
