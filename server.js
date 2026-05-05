@@ -417,7 +417,14 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         if (message.from_me) return res.sendStatus(200);
 
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
-        const customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
+        let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
+        
+        // Normalize: if 10 digits, assume India and add 91. 
+        if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
+        // Always ensure '+' prefix for consistency in DB and Dashboard
+        if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) {
+            customerPhone = '+' + customerPhone;
+        }
         const text = message.text || message.message || "Media/Unsupported message";
 
         console.log(`💬 [WEBHOOK] From: ${customerPhone} | Text: ${text}`);
@@ -446,13 +453,17 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             try {
                 console.log('📤 [WEBHOOK] Sending to Interakt API...');
                 
-                // Ensure phone has '+' prefix for Interakt
-                const formattedPhone = customerPhone.startsWith('+') ? customerPhone : `+${customerPhone}`;
+                const formattedPhone = customerPhone;
                 
+                console.log(`📱 [WEBHOOK] Target Phone: ${formattedPhone}`);
+
+                // Try with the structure that got past the "data is required" check
                 const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
-                    full_phone_number: formattedPhone,
-                    type: 'Text',
-                    message: response
+                    data: {
+                        full_phone_number: formattedPhone,
+                        type: 'text', // Try lowercase
+                        message: response
+                    }
                 }, {
                     headers: { 'Authorization': `Basic ${client.apiKey}` }
                 });
@@ -464,25 +475,24 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             } catch (apiErr) {
                 console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
                 
-                // If the error was "data is a required field", try wrapping it
-                if (apiErr.response?.data?.message?.includes('data is a required field')) {
-                    console.log('🔄 [WEBHOOK] Retrying with "data" wrapper...');
+                // Final fallback attempt with the other common structure
+                if (apiErr.response?.status === 400) {
+                    console.log('🔄 [WEBHOOK] Retrying with flat structure...');
                     try {
-                        const formattedPhone = customerPhone.startsWith('+') ? customerPhone : `+${customerPhone}`;
-                        const retryRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
-                            data: {
-                                full_phone_number: formattedPhone,
-                                type: 'Text',
-                                message: response
-                            }
+                        const formattedPhone = customerPhone;
+
+                        await axios.post('https://api.interakt.ai/v1/public/message/', {
+                            full_phone_number: formattedPhone,
+                            type: 'Text',
+                            message: response
                         }, {
                             headers: { 'Authorization': `Basic ${client.apiKey}` }
                         });
-                        console.log('✅ [WEBHOOK] Interakt Retry Success:', retryRes.status);
+                        console.log('✅ [WEBHOOK] Interakt Flat Retry Success');
                         chat.messages.push({ sender: 'bot', text: response });
                         await chat.save();
-                    } catch (retryErr) {
-                        console.error('❌ [WEBHOOK] Retry Failed:', retryErr.response?.data || retryErr.message);
+                    } catch (err2) {
+                        console.error('❌ [WEBHOOK] All send attempts failed.');
                     }
                 }
             }
