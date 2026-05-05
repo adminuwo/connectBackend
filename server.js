@@ -344,10 +344,19 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         if (!client || !client.botEnabled) return res.sendStatus(200);
 
         const message = body.data?.message;
-        if (!message || message.from_me) return res.sendStatus(200);
+        if (!message) return res.sendStatus(200);
+        
+        // If it's a message from the bot/me, we skip processing to avoid loops
+        if (message.from_me) return res.sendStatus(200);
 
-        const customerPhone = message.customer_number;
-        const text = message.text;
+        // Interakt can send phone/text in different fields depending on webhook version
+        const customerPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
+        const text = message.text || message.message || "Media/Unsupported message";
+
+        if (customerPhone === "unknown") {
+            console.log('[WEBHOOK] Skipping: No customer phone found in payload');
+            return res.sendStatus(200);
+        }
 
         // 1. Log customer message
         let chat = await Chat.findOne({ clientId, customerPhone });
@@ -359,22 +368,26 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         await chat.save();
 
         // 2. Get AI Response
-        if (openai) {
+        if (openai && text !== "Media/Unsupported message") {
             const response = await rag.query(clientId, text);
             
             // 3. Send response via Interakt API
-            const axios = require('axios');
-            await axios.post('https://api.interakt.ai/v1/public/message/', {
-                full_phone_number: customerPhone,
-                type: 'Text',
-                message: response
-            }, {
-                headers: { 'Authorization': `Basic ${client.apiKey}` }
-            });
+            try {
+                const axios = require('axios');
+                await axios.post('https://api.interakt.ai/v1/public/message/', {
+                    full_phone_number: customerPhone,
+                    type: 'Text',
+                    message: response
+                }, {
+                    headers: { 'Authorization': `Basic ${client.apiKey}` }
+                });
 
-            // 4. Log bot message
-            chat.messages.push({ sender: 'bot', text: response });
-            await chat.save();
+                // 4. Log bot message
+                chat.messages.push({ sender: 'bot', text: response });
+                await chat.save();
+            } catch (apiErr) {
+                console.error('[WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
+            }
         }
 
         res.sendStatus(200);
