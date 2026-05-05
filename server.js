@@ -618,8 +618,13 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
     res.json({ success: true });
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ [SUCCESS] Server is booting up...`);
+    console.log(`🌐 Listening on: 0.0.0.0:${PORT}`);
+    
     // Call sync after everything is initialized
-    syncKnowledgeBase();
+    console.log('🔄 Starting Knowledge Base sync...');
+    syncKnowledgeBase().catch(err => {
+        console.error('❌ [SYNC ERROR] Sync failed but server is still running:', err.message);
+    });
 });
