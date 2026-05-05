@@ -399,22 +399,30 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
     try {
         const client = await Client.findById(clientId);
-        if (!client || !client.botEnabled) return res.sendStatus(200);
+        if (!client) {
+            console.log(`❌ [WEBHOOK] Client ${clientId} not found in DB`);
+            return res.sendStatus(200);
+        }
+        
+        console.log(`📡 [WEBHOOK] Processing for ${client.name}. Bot Enabled: ${client.botEnabled}`);
+        if (!client.botEnabled) return res.sendStatus(200);
 
         const message = body.data?.message;
-        if (!message) return res.sendStatus(200);
+        if (!message) {
+            console.log('ℹ️ [WEBHOOK] No message object in payload');
+            return res.sendStatus(200);
+        }
         
-        // If it's a message from the bot/me, we skip processing to avoid loops
         if (message.from_me) return res.sendStatus(200);
 
-        // Normalize phone number by removing non-digits to prevent duplicates (+91... vs 91...)
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
         const customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
-
         const text = message.text || message.message || "Media/Unsupported message";
 
+        console.log(`💬 [WEBHOOK] From: ${customerPhone} | Text: ${text}`);
+
         if (customerPhone === "unknown") {
-            console.log('[WEBHOOK] Skipping: No customer phone found in payload');
+            console.log('⚠️ [WEBHOOK] Skipping: No customer phone found');
             return res.sendStatus(200);
         }
 
@@ -429,29 +437,35 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
         // 2. Get AI Response
         if (openai && text !== "Media/Unsupported message") {
+            console.log('🤖 [WEBHOOK] Calling RAG Query...');
             const response = await rag.query(clientId, text);
+            console.log(`✨ [WEBHOOK] AI Response generated: "${response.substring(0, 30)}..."`);
             
             // 3. Send response via Interakt API
             try {
-                await axios.post('https://api.interakt.ai/v1/public/message/', {
+                console.log('📤 [WEBHOOK] Sending to Interakt API...');
+                const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
                     full_phone_number: customerPhone,
                     type: 'Text',
                     message: response
                 }, {
                     headers: { 'Authorization': `Basic ${client.apiKey}` }
                 });
+                console.log('✅ [WEBHOOK] Interakt Response:', interaktRes.status);
 
                 // 4. Log bot message
                 chat.messages.push({ sender: 'bot', text: response });
                 await chat.save();
             } catch (apiErr) {
-                console.error('[WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
+                console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
             }
+        } else {
+            console.log(`⚠️ [WEBHOOK] AI skipped. OpenAI Ready: ${!!openai} | Text valid: ${text !== "Media/Unsupported message"}`);
         }
 
         res.sendStatus(200);
     } catch (err) {
-        console.error('[WEBHOOK ERROR]', err.message);
+        console.error('💥 [WEBHOOK CRITICAL ERROR]', err.message);
         res.sendStatus(200);
     }
 });
