@@ -87,7 +87,8 @@ app.get('/uploads/logos/:filename', async (req, res) => {
             console.error(`❌ [FALLBACK] Logo recovery failed: ${e.message}`);
         }
     }
-    res.status(404).send('Not found');
+    // Final fallback: serve a default blank logo if nothing works
+    res.redirect('https://cdn-icons-png.flaticon.com/512/3135/3135715.png'); 
 });
 
 app.get('/uploads/:clientId/:filename', async (req, res) => {
@@ -444,8 +445,12 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             // 3. Send response via Interakt API
             try {
                 console.log('📤 [WEBHOOK] Sending to Interakt API...');
+                
+                // Ensure phone has '+' prefix for Interakt
+                const formattedPhone = customerPhone.startsWith('+') ? customerPhone : `+${customerPhone}`;
+                
                 const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
-                    full_phone_number: customerPhone,
+                    full_phone_number: formattedPhone,
                     type: 'Text',
                     message: response
                 }, {
@@ -458,6 +463,28 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 await chat.save();
             } catch (apiErr) {
                 console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
+                
+                // If the error was "data is a required field", try wrapping it
+                if (apiErr.response?.data?.message?.includes('data is a required field')) {
+                    console.log('🔄 [WEBHOOK] Retrying with "data" wrapper...');
+                    try {
+                        const formattedPhone = customerPhone.startsWith('+') ? customerPhone : `+${customerPhone}`;
+                        const retryRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
+                            data: {
+                                full_phone_number: formattedPhone,
+                                type: 'Text',
+                                message: response
+                            }
+                        }, {
+                            headers: { 'Authorization': `Basic ${client.apiKey}` }
+                        });
+                        console.log('✅ [WEBHOOK] Interakt Retry Success:', retryRes.status);
+                        chat.messages.push({ sender: 'bot', text: response });
+                        await chat.save();
+                    } catch (retryErr) {
+                        console.error('❌ [WEBHOOK] Retry Failed:', retryErr.response?.data || retryErr.message);
+                    }
+                }
             }
         } else {
             console.log(`⚠️ [WEBHOOK] AI skipped. OpenAI Ready: ${!!openai} | Text valid: ${text !== "Media/Unsupported message"}`);
