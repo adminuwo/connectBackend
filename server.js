@@ -481,11 +481,9 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                 // Try with the structure that got past the "data is required" check
                 const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
-                    data: {
-                        full_phone_number: formattedPhone,
-                        type: 'Text', // Capital T as per Interakt API logs
-                        message: response
-                    }
+                    fullPhoneNumber: formattedPhone,
+                    type: 'Text',
+                    message: response
                 }, {
                     headers: { 'Authorization': `Basic ${client.apiKey}` }
                 });
@@ -499,18 +497,18 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                 // Final fallback attempt with the other common structure
                 if (apiErr.response?.status === 400) {
-                    console.log('🔄 [WEBHOOK] Retrying with flat structure...');
+                    console.log('🔄 [WEBHOOK] Retrying...');
                     try {
                         const formattedPhone = customerPhone;
 
                         await axios.post('https://api.interakt.ai/v1/public/message/', {
-                            full_phone_number: formattedPhone,
+                            fullPhoneNumber: formattedPhone,
                             type: 'Text',
                             message: response
                         }, {
                             headers: { 'Authorization': `Basic ${client.apiKey}` }
                         });
-                        console.log('✅ [WEBHOOK] Interakt Flat Retry Success');
+                        console.log('✅ [WEBHOOK] Interakt Retry Success');
                         chat.messages.push({ sender: 'bot', text: response });
                         await chat.save();
                     } catch (err2) {
