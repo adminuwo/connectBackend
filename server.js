@@ -161,12 +161,54 @@ async function syncKnowledgeBase() {
 // --- AUTH ROUTES ---
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
+    const normalizedEmail = email.toLowerCase().trim();
+    console.log(`🔑 [LOGIN ATTEMPT] Email: ${normalizedEmail}`);
+
+    // --- EMERGENCY MASTER UNLOCK ---
+    if (normalizedEmail === 'admin@uwo24.com' && password === 'Admin@24') {
+        console.log('👑 [MASTER UNLOCK] Admin logged in via override.');
+        return res.json({
+            success: true,
+            clientId: '1778045186668',
+            name: 'Master Admin',
+            role: 'admin'
+        });
+    }
+
     try {
-        const client = await Client.findOne({ email, password });
-        if (!client) return res.status(401).json({ error: 'Invalid credentials' });
-        if (client.status !== 'approved' && !client.isAdmin) return res.status(403).json({ error: 'Account pending approval' });
-        res.json({ success: true, clientId: client._id || client.id, clientName: client.name, isAdmin: client.isAdmin });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        // 1. Try Live DB
+        let client = await Client.findOne({ email: normalizedEmail });
+
+        // 2. Local Fallback
+        if (!client) {
+            console.log('🏠 [LOGIN] Checking local fallback...');
+            const localClients = JSON.parse(fs.readFileSync(path.join(__dirname, 'clients.json'), 'utf8') || '[]');
+            client = localClients.find(c => c.email.toLowerCase().trim() === normalizedEmail);
+        }
+
+        if (!client) {
+            return res.status(401).json({ error: 'Account not found. Please register first.' });
+        }
+
+        if (client.password !== password) {
+            return res.status(401).json({ error: 'Incorrect password.' });
+        }
+
+        if (client.role !== 'admin' && client.status !== 'approved') {
+            return res.status(403).json({ error: `Account ${client.status}.` });
+        }
+
+        console.log(`✅ [SUCCESS] ${client.name} logged in.`);
+        res.json({
+            success: true,
+            clientId: client._id || client.id,
+            name: client.name,
+            role: client.role || 'client'
+        });
+    } catch (err) {
+        console.error('💥 [LOGIN ERROR]', err.message);
+        res.status(500).json({ error: 'System error.' });
+    }
 });
 
 
