@@ -40,5 +40,21 @@
     "email": "aditi@uwo24.com",
     "password": "123456",
     "_id": "1777898150351"
+  },
+  {
+    "createdAt": "2026-05-06T05:26:26.668Z",
+    "status": "approved",
+    "isAdmin": true,
+    "whatsappNumber": "",
+    "apiKey": "",
+    "logoUrl": "",
+    "botEnabled": false,
+    "autoReplyRules": "",
+    "documents": [],
+    "name": "Master Admin",
+    "email": "admin@uwo24.com",
+    "password": "Admin@24",
+    "role": "admin",
+    "_id": "1778045186668"
   }
 ]

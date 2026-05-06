@@ -44,6 +44,7 @@ const ClientSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     role: { type: String, default: 'client' },
+    isAdmin: { type: Boolean, default: false },
     status: { type: String, default: 'pending' },
     whatsappNumber: { type: String, default: '' },
     apiKey: { type: String, default: '' },
@@ -180,7 +181,7 @@ class MockModel {
         // Define defaults based on model
         let defaults = { createdAt: new Date() };
         if (modelName === 'Client') {
-            defaults = { ...defaults, status: 'pending', whatsappNumber: '', apiKey: '', logoUrl: '', botEnabled: false, autoReplyRules: '', documents: [] };
+            defaults = { ...defaults, status: 'pending', isAdmin: false, whatsappNumber: '', apiKey: '', logoUrl: '', botEnabled: false, autoReplyRules: '', documents: [] };
         } else if (modelName === 'Ticket' || modelName === 'Chat') {
             defaults = { ...defaults, messages: [], status: 'open', lastUpdate: Date.now() };
         }

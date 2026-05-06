@@ -330,6 +330,28 @@ app.post('/api/support/send', async (req, res) => {
 });
 
 // --- ADMIN ROUTES ---
+app.post('/api/admin/clients/create', async (req, res) => {
+    const { name, email, password } = req.body;
+    try {
+        const existing = await Client.findOne({ email });
+        if (existing) return res.status(400).json({ error: 'Email already exists' });
+
+        const client = Client.new ? Client.new({ 
+            name, 
+            email, 
+            password, 
+            status: 'approved' // Admin created clients are pre-approved
+        }) : new Client({ 
+            name, 
+            email, 
+            password, 
+            status: 'approved' 
+        });
+        await client.save();
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/admin/clients', async (req, res) => {
     try {
         const clients = await Client.find({ role: { $ne: 'admin' } });

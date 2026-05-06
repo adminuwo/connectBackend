@@ -110,6 +110,8 @@ async function downloadFromBucket(clientId, fileName, localPath) {
 }
 
 module.exports = {
+    storage,
+    bucket,
     uploadToBucket,
     deleteFromBucket,
     listClientFiles,
