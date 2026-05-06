@@ -427,25 +427,23 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // PREVENT LOOP: Ignore messages sent by the bot (outbound)
-        const type = body.type || "";
-        const direction = message.direction || "";
-        
-        if (type.includes('sent') || direction === 'outbound') {
-            console.log('ℹ️ [WEBHOOK] Ignoring outbound message to prevent loop');
-            return res.sendStatus(200);
-        }
-
-        console.log(`📡 [WEBHOOK] Processing for ${client.name}. Bot Enabled: ${client.botEnabled}`);
-        if (!client.botEnabled) return res.sendStatus(200);
-
         const message = body.data?.message;
         if (!message) {
             console.log('ℹ️ [WEBHOOK] No message object in payload');
             return res.sendStatus(200);
         }
 
-        if (message.from_me) return res.sendStatus(200);
+        // PREVENT LOOP: Ignore messages sent by the bot (outbound)
+        const type = body.type || "";
+        const direction = message.direction || "";
+        
+        if (type.includes('sent') || direction === 'outbound' || message.from_me) {
+            console.log('ℹ️ [WEBHOOK] Ignoring outbound message to prevent loop');
+            return res.sendStatus(200);
+        }
+
+        console.log(`📡 [WEBHOOK] Processing for ${client.name}. Bot Enabled: ${client.botEnabled}`);
+        if (!client.botEnabled) return res.sendStatus(200);
 
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
         let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
