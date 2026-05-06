@@ -481,9 +481,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                 // Try with the structure that got past the "data is required" check
                 const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
-                    fullPhoneNumber: formattedPhone,
-                    type: 'Text',
-                    message: response
+                    data: {
+                        full_phone_number: formattedPhone,
+                        type: 'Text',
+                        message: response
+                    }
                 }, {
                     headers: { 'Authorization': `Basic ${client.apiKey}` }
                 });
@@ -502,9 +504,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         const formattedPhone = customerPhone;
 
                         await axios.post('https://api.interakt.ai/v1/public/message/', {
-                            fullPhoneNumber: formattedPhone,
-                            type: 'Text',
-                            message: response
+                            data: {
+                                full_phone_number: formattedPhone,
+                                type: 'Text',
+                                message: response
+                            }
                         }, {
                             headers: { 'Authorization': `Basic ${client.apiKey}` }
                         });
