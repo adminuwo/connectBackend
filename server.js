@@ -483,7 +483,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
                     data: {
                         full_phone_number: formattedPhone,
-                        type: 'text', // Try lowercase
+                        type: 'Text', // Capital T as per Interakt API logs
                         message: response
                     }
                 }, {
