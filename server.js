@@ -515,7 +515,9 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     await axios.post('https://api.interakt.ai/v1/public/message/', {
                         fullPhoneNumber: customerPhone,
                         type: 'Text',
-                        text: response
+                        data: {
+                            message: response
+                        }
                     }, {
                         headers: { 'Authorization': `Basic ${client.apiKey}` }
                     });
