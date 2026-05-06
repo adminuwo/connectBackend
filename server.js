@@ -448,34 +448,31 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // 2. PREVENT LOOP: Check for echoes or outbound messages
-        const lastMsgKey = `${clientId}_${customerPhone}`;
-        const type = body.type || "";
-        const direction = message.direction || "";
-        const lastBotMsg = lastBotMessages.get(lastMsgKey) || "";
-        
-        // ECHO CHECK: If message text starts with the same content as the last bot reply
-        // Or if the direction is clearly outbound
-        const isEcho = lastBotMsg && (text.startsWith(lastBotMsg.substring(0, 20)) || lastBotMsg.startsWith(text.substring(0, 20)));
-        const isOutbound = type.includes('sent') || direction === 'outbound' || message.from_me || message.delivered === true;
-
-        if (isOutbound || isEcho) {
-            console.log(`ℹ️ [WEBHOOK] Ignoring message (Outbound: ${!!isOutbound}, Echo: ${!!isEcho})`);
-            return res.sendStatus(200);
-        }
-
         console.log(`📡 [WEBHOOK] Processing for ${client.name}. Bot Enabled: ${client.botEnabled}`);
         if (!client.botEnabled) return res.sendStatus(200);
-
-        console.log(`💬 [WEBHOOK] From: ${customerPhone} | Text: ${text}`);
 
         if (customerPhone === "unknown") {
             console.log('⚠️ [WEBHOOK] Skipping: No customer phone found');
             return res.sendStatus(200);
         }
 
-        // 1. Log customer message
+        // --- DATABASE LEVEL LOOP PREVENTION ---
         let chat = await Chat.findOne({ clientId, customerPhone });
+        if (chat && chat.messages.length > 0) {
+            const lastMsg = chat.messages[chat.messages.length - 1];
+            if (lastMsg.sender === 'bot') {
+                // If it's a fuzzy match with the last bot reply, ignore it
+                const isEcho = text.startsWith(lastMsg.text.substring(0, 30)) || lastMsg.text.startsWith(text.substring(0, 30));
+                if (isEcho) {
+                    console.log('ℹ️ [WEBHOOK] DB Echo detected. Ignoring.');
+                    return res.sendStatus(200);
+                }
+            }
+        }
+        
+        console.log(`💬 [WEBHOOK] From: ${customerPhone} | Text: ${text}`);
+
+        // 1. Log customer message
         if (!chat) {
             chat = Chat.new ? Chat.new({ clientId, customerPhone }) : new Chat({ clientId, customerPhone });
         }
@@ -494,9 +491,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     console.log('📤 [WEBHOOK] Sending to Interakt API...');
                     const formattedPhone = customerPhone;
 
-                    // Update Deduplication Cache BEFORE sending to prevent race condition
-                    lastBotMessages.set(`${clientId}_${customerPhone}`, response);
-
                     const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
                     fullPhoneNumber: formattedPhone,
                     type: 'Text',
@@ -511,14 +505,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 // 4. Log bot message
                 chat.messages.push({ sender: 'bot', text: response });
                 await chat.save();
-
-                // Clear cache after 30 seconds
-                setTimeout(() => {
-                    const key = `${clientId}_${customerPhone}`;
-                    if (lastBotMessages.get(key) === response) {
-                        lastBotMessages.delete(key);
-                    }
-                }, 30000);
             } catch (apiErr) {
                 console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
 
