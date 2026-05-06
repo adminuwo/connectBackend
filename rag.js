@@ -4,6 +4,7 @@ const mammoth = require('mammoth');
 const pdf = require('pdf-parse');
 const WordExtractor = require("word-extractor");
 const extractor = new WordExtractor();
+const XLSX = require('xlsx');
 
 class SimpleRAG {
     constructor(openai) {
@@ -47,6 +48,14 @@ class SimpleRAG {
             } else if (ext === '.doc') {
                 const doc = await extractor.extract(filePath);
                 return doc.getBody();
+            } else if (ext === '.xlsx' || ext === '.xls') {
+                const workbook = XLSX.readFile(filePath);
+                let fullText = "";
+                workbook.SheetNames.forEach(sheetName => {
+                    const sheet = workbook.Sheets[sheetName];
+                    fullText += XLSX.utils.sheet_to_txt(sheet) + "\n";
+                });
+                return fullText;
             }
         } catch (error) {
             console.error(`[RAG] Error extracting text from ${filePath}:`, error.message);
@@ -60,7 +69,7 @@ class SimpleRAG {
             fs.mkdirSync(clientPath, { recursive: true });
         }
 
-        const supportedExts = ['.txt', '.docx', '.pdf', '.doc'];
+        const supportedExts = ['.txt', '.docx', '.pdf', '.doc', '.xlsx', '.xls'];
         const files = fs.readdirSync(clientPath).filter(f => supportedExts.includes(path.extname(f).toLowerCase()));
         this.clientChunks[clientId] = [];
 

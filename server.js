@@ -237,29 +237,29 @@ app.post('/api/client/:id/toggle-bot', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/upload', upload.single('file'), async (req, res) => {
+app.post('/api/client/:id/upload', upload.array('files'), async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
-        const fileName = req.file.filename;
         const docs = client.documents || [];
-        docs.push(fileName);
-
-        await Client.findByIdAndUpdate(req.params.id, { documents: docs });
-
         const clientId = req.params.id;
         const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const clientFolder = `${sanitizedName}_${clientId}`;
         const clientKbDir = path.join(__dirname, 'knowledge_base', clientFolder);
         
         if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
-        fs.copyFileSync(req.file.path, path.join(clientKbDir, fileName));
 
-        if (gcs.isGcsActive) {
-            await gcs.uploadToBucket(clientFolder, fileName, req.file.path);
+        for (const file of req.files) {
+            const fileName = file.filename;
+            docs.push(fileName);
+            fs.copyFileSync(file.path, path.join(clientKbDir, fileName));
+            if (gcs.isGcsActive) {
+                await gcs.uploadToBucket(clientFolder, fileName, file.path);
+            }
         }
 
+        await Client.findByIdAndUpdate(req.params.id, { documents: docs });
         if (openai) await rag.init();
-        res.json({ success: true, fileName });
+        res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
