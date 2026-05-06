@@ -20,9 +20,13 @@ class SimpleRAG {
 
         const clientFolders = fs.readdirSync(this.baseKbPath).filter(f => fs.lstatSync(path.join(this.baseKbPath, f)).isDirectory());
         
-        for (const clientId of clientFolders) {
-            console.log(`[RAG] 📁 Found knowledge folder for client: ${clientId}`);
-            await this.loadClientKnowledge(clientId);
+        for (const folderName of clientFolders) {
+            // Extract ID from Name_ID format
+            const parts = folderName.split('_');
+            const clientId = parts[parts.length - 1]; // Assume ID is always the last part
+            
+            console.log(`[RAG] 📁 Loading knowledge from: ${folderName} (ID: ${clientId})`);
+            await this.loadClientKnowledge(folderName, clientId);
         }
         
         console.log(`[RAG] ✅ Initialization complete. Active clients: ${Object.keys(this.clientChunks).length}`);
@@ -50,8 +54,8 @@ class SimpleRAG {
         return '';
     }
 
-    async loadClientKnowledge(clientId) {
-        const clientPath = path.join(this.baseKbPath, clientId);
+    async loadClientKnowledge(folderName, clientId) {
+        const clientPath = path.join(this.baseKbPath, folderName);
         if (!fs.existsSync(clientPath)) {
             fs.mkdirSync(clientPath, { recursive: true });
         }

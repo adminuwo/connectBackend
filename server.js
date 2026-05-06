@@ -134,15 +134,17 @@ async function syncKnowledgeBase() {
         if (!fs.existsSync(kbRoot)) fs.mkdirSync(kbRoot, { recursive: true });
 
         for (const client of clients) {
-            const clientId = client._id ? client._id.toString() : client.id;
-            const clientKbDir = path.join(kbRoot, clientId);
+            const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const clientFolder = `${sanitizedName}_${client._id || client.id}`;
+            const clientKbDir = path.join(kbRoot, clientFolder);
+            
             if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
 
             if (gcs.isGcsActive) {
-                const cloudFiles = await gcs.listClientFiles(clientId);
+                const cloudFiles = await gcs.listClientFiles(clientFolder);
                 for (const file of cloudFiles) {
                     const localFilePath = path.join(clientKbDir, file);
-                    if (!fs.existsSync(localFilePath)) await gcs.downloadFromBucket(clientId, file, localFilePath);
+                    if (!fs.existsSync(localFilePath)) await gcs.downloadFromBucket(clientFolder, file, localFilePath);
                 }
             }
         }
@@ -187,6 +189,13 @@ app.post('/api/auth/register', async (req, res) => {
 
         const client = new Client({ name, email, password, whatsappNumber, businessName, businessType, status: 'pending' });
         await client.save();
+
+        // Create initial RAG folder
+        const sanitizedName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const clientFolder = `${sanitizedName}_${client._id || client.id}`;
+        const clientKbDir = path.join(__dirname, 'knowledge_base', clientFolder);
+        if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
+
         await OTP.deleteOne({ email });
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -235,12 +244,15 @@ app.post('/api/client/:id/upload', upload.single('file'), async (req, res) => {
         await Client.findByIdAndUpdate(req.params.id, { documents: docs });
 
         const clientId = req.params.id;
-        const clientKbDir = path.join(__dirname, 'knowledge_base', clientId);
+        const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const clientFolder = `${sanitizedName}_${clientId}`;
+        const clientKbDir = path.join(__dirname, 'knowledge_base', clientFolder);
+        
         if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
         fs.copyFileSync(req.file.path, path.join(clientKbDir, fileName));
 
         if (gcs.isGcsActive) {
-            await gcs.uploadToBucket(clientId, fileName, req.file.path);
+            await gcs.uploadToBucket(clientFolder, fileName, req.file.path);
         }
 
         if (openai) await rag.init();
@@ -298,14 +310,16 @@ app.get('/api/client/:clientId/chats', async (req, res) => {
 
 app.delete('/api/client/:id/documents/:filename', async (req, res) => {
     try {
-        const client = await Client.findById(req.params.id);
+        const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const clientFolder = `${sanitizedName}_${client._id || client.id}`;
+        
         const docs = (client.documents || []).filter(d => d !== req.params.filename);
         await Client.findByIdAndUpdate(req.params.id, { documents: docs });
 
-        const localPath = path.join(__dirname, 'knowledge_base', req.params.id, req.params.filename);
+        const localPath = path.join(__dirname, 'knowledge_base', clientFolder, req.params.filename);
         if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
 
-        if (gcs.isGcsActive) await gcs.deleteFromBucket(req.params.id, req.params.filename);
+        if (gcs.isGcsActive) await gcs.deleteFromBucket(clientFolder, req.params.filename);
         if (openai) await rag.init();
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -350,6 +364,12 @@ app.post('/api/admin/clients/create', async (req, res) => {
 
         const client = new Client(clientData);
         await client.save();
+
+        // Create initial RAG folder for admin-created client
+        const sanitizedName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const clientFolder = `${sanitizedName}_${client._id || client.id}`;
+        const clientKbDir = path.join(__dirname, 'knowledge_base', clientFolder);
+        if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
