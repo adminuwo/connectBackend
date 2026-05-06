@@ -433,28 +433,30 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // PREVENT LOOP: Ignore messages sent by the bot (outbound)
+        // 1. Extract and Normalize Data Immediately
+        const text = (message.text || message.message || "").trim();
+        const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
+        let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
+        if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
+        if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
+
+        if (!text) {
+            console.log('ℹ️ [WEBHOOK] Empty message text, ignoring.');
+            return res.sendStatus(200);
+        }
+
+        // 2. PREVENT LOOP: Check for echoes or outbound messages
+        const lastMsgKey = `${clientId}_${customerPhone}`;
         const type = body.type || "";
         const direction = message.direction || "";
         
-        if (type.includes('sent') || direction === 'outbound' || message.from_me) {
-            console.log('ℹ️ [WEBHOOK] Ignoring outbound message to prevent loop');
+        if (type.includes('sent') || direction === 'outbound' || message.from_me || lastBotMessages.get(lastMsgKey) === text) {
+            console.log('ℹ️ [WEBHOOK] Ignoring outbound/echo message to prevent loop');
             return res.sendStatus(200);
         }
 
         console.log(`📡 [WEBHOOK] Processing for ${client.name}. Bot Enabled: ${client.botEnabled}`);
         if (!client.botEnabled) return res.sendStatus(200);
-
-        const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
-        let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
-
-        // Normalize: if 10 digits, assume India and add 91. 
-        if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
-        // Always ensure '+' prefix for consistency in DB and Dashboard
-        if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) {
-            customerPhone = '+' + customerPhone;
-        }
-        const text = message.text || message.message || "Media/Unsupported message";
 
         console.log(`💬 [WEBHOOK] From: ${customerPhone} | Text: ${text}`);
 
