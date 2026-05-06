@@ -505,6 +505,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             if (openai && text !== "Media/Unsupported message") {
                 const response = await rag.query(clientId, text);
 
+                try {
                     await axios.post('https://api.interakt.ai/v1/public/message/', {
                         fullPhoneNumber: customerPhone,
                         type: 'Text',
