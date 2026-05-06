@@ -36,23 +36,21 @@ class SimpleRAG {
     async extractTextFromFile(filePath) {
         const ext = path.extname(filePath).toLowerCase();
         try {
-            if (ext === '.txt') {
-                return fs.readFileSync(filePath, 'utf-8');
-            } else if (ext === '.docx') {
-                const result = await mammoth.extractRawText({ path: filePath });
-                return result.value;
-            } else if (ext === '.pdf') {
+            if (ext === '.pdf') {
                 const dataBuffer = fs.readFileSync(filePath);
                 const data = await pdf(dataBuffer);
                 return data.text;
-            } else if (ext === '.doc') {
+            } else if (ext === '.docx' || ext === '.doc') {
                 const doc = await extractor.extract(filePath);
                 return doc.getBody();
+            } else if (ext === '.txt') {
+                return fs.readFileSync(filePath, 'utf8');
             } else if (ext === '.xlsx' || ext === '.xls') {
                 const workbook = XLSX.readFile(filePath);
                 let fullText = "";
                 workbook.SheetNames.forEach(sheetName => {
                     const sheet = workbook.Sheets[sheetName];
+                    fullText += `--- Sheet: ${sheetName} ---\n`;
                     fullText += XLSX.utils.sheet_to_txt(sheet) + "\n";
                 });
                 return fullText;

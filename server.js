@@ -320,6 +320,9 @@ app.delete('/api/client/:id/chats/:phone', async (req, res) => {
 
 app.delete('/api/client/:id/documents/:filename', async (req, res) => {
     try {
+        const client = await Client.findById(req.params.id);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+
         const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const clientFolder = `${sanitizedName}_${client._id || client.id}`;
         
@@ -332,7 +335,10 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
         if (gcs.isGcsActive) await gcs.deleteFromBucket(clientFolder, req.params.filename);
         if (openai) await rag.init();
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error('❌ [DELETE DOC ERROR]', err.message);
+        res.status(500).json({ error: err.message }); 
+    }
 });
 
 app.get('/api/client/:clientId/support', async (req, res) => {
