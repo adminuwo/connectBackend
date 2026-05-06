@@ -295,10 +295,12 @@ app.post('/api/client/:id/deactivate', async (req, res) => {
 
 app.get('/api/client/:clientId/chats', async (req, res) => {
     try {
-        const chats = await Chat.find({ clientId: req.params.clientId });
+        const chats = await Chat.find({ clientId: req.params.clientId }) || [];
         const chatMap = {};
         chats.forEach(c => {
-            chatMap[c.customerPhone] = c.messages;
+            if (c && c.customerPhone) {
+                chatMap[c.customerPhone] = c.messages || [];
+            }
         });
         res.json(chatMap);
     } catch (err) { res.status(500).json({ error: err.message }); }
