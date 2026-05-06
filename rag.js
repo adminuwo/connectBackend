@@ -174,7 +174,13 @@ class SimpleRAG {
             Use the following context from the business's knowledge base to answer the customer.
             If the answer is not in the context, provide a polite general response based on your knowledge.
             Keep the tone professional and friendly.
-            IMPORTANT: Provide the response in a single, concise paragraph. Avoid long lists or multiple paragraphs. Do NOT use newlines or multiple blocks of text. Everything must be in one continuous block.
+            IMPORTANT: Structure your response for high readability on WhatsApp.
+            - Start with a friendly greeting and emoji (e.g., Hello! 😊).
+            - Use double newlines (Enter twice) to separate paragraphs or points.
+            - Use bullet points (•) for listing items or features.
+            - Use *bold text* for important information like business names, timings, or prices.
+            - End with a friendly closing emoji.
+            Keep it structured, spaced out, and visually appealing.
 
             CONTEXT:
             ${context || 'No specific context found.'}
