@@ -179,11 +179,12 @@ class SimpleRAG {
             If the answer is not in the context, provide a polite general response based on your knowledge.
             Keep the tone professional and friendly.
             IMPORTANT: Structure your response for high readability on WhatsApp.
-            - Start with a friendly greeting and emoji (e.g., Hello! 😊).
+            - Keep the tone professional and friendly.
+            - Greet the user naturally (only if it feels like the start of a conversation).
             - Use double newlines (Enter twice) to separate paragraphs or points.
             - Use bullet points (•) for listing items or features.
             - Use *bold text* for important information like business names, timings, or prices.
-            - End with a friendly closing emoji.
+            - Use relevant emojis sparingly to keep the tone friendly.
             Keep it structured, spaced out, and visually appealing.
 
             CONTEXT:

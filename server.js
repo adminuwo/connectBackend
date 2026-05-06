@@ -311,6 +311,13 @@ app.get('/api/client/:clientId/chats', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.delete('/api/client/:id/chats/:phone', async (req, res) => {
+    try {
+        await Chat.deleteOne({ clientId: req.params.id, customerPhone: req.params.phone });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/client/:id/documents/:filename', async (req, res) => {
     try {
         const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
