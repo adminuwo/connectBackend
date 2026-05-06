@@ -452,9 +452,15 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const lastMsgKey = `${clientId}_${customerPhone}`;
         const type = body.type || "";
         const direction = message.direction || "";
+        const lastBotMsg = lastBotMessages.get(lastMsgKey) || "";
         
-        if (type.includes('sent') || direction === 'outbound' || message.from_me || lastBotMessages.get(lastMsgKey) === text) {
-            console.log('ℹ️ [WEBHOOK] Ignoring outbound/echo message to prevent loop');
+        // ECHO CHECK: If message text starts with the same content as the last bot reply
+        // Or if the direction is clearly outbound
+        const isEcho = lastBotMsg && (text.startsWith(lastBotMsg.substring(0, 20)) || lastBotMsg.startsWith(text.substring(0, 20)));
+        const isOutbound = type.includes('sent') || direction === 'outbound' || message.from_me || message.delivered === true;
+
+        if (isOutbound || isEcho) {
+            console.log(`ℹ️ [WEBHOOK] Ignoring message (Outbound: ${!!isOutbound}, Echo: ${!!isEcho})`);
             return res.sendStatus(200);
         }
 
