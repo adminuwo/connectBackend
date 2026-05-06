@@ -326,17 +326,26 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
         const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const clientFolder = `${sanitizedName}_${client._id || client.id}`;
         
+        // Update DB first for immediate UI feedback
         const docs = (client.documents || []).filter(d => d !== req.params.filename);
         await Client.findByIdAndUpdate(req.params.id, { documents: docs });
 
-        const localPath = path.join(__dirname, 'knowledge_base', clientFolder, req.params.filename);
-        if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+        // Perform cleanup in background to avoid timeout
+        (async () => {
+            try {
+                const localPath = path.join(__dirname, 'knowledge_base', clientFolder, req.params.filename);
+                if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+                if (gcs.isGcsActive) await gcs.deleteFromBucket(clientFolder, req.params.filename);
+                if (openai) await rag.init();
+                console.log(`🗑️ [DELETE] Successfully removed ${req.params.filename} for client ${client.name}`);
+            } catch (bgErr) {
+                console.error('⚠️ [DELETE BG ERROR]', bgErr.message);
+            }
+        })();
 
-        if (gcs.isGcsActive) await gcs.deleteFromBucket(clientFolder, req.params.filename);
-        if (openai) await rag.init();
         res.json({ success: true });
     } catch (err) { 
-        console.error('❌ [DELETE DOC ERROR]', err.message);
+        console.error('❌ [DELETE DOC CRITICAL ERROR]', err.message);
         res.status(500).json({ error: err.message }); 
     }
 });
