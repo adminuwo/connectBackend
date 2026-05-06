@@ -531,7 +531,30 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             await chat.save();
 
             if (openai && text !== "Media/Unsupported message") {
-                const response = await rag.query(clientId, text);
+                const normalizedMsg = text.toLowerCase().trim();
+                const greetingKeywords = ['hi', 'hello', 'hey', 'start', 'namaste', 'aslam', 'help', 'ji', 'hye'];
+                
+                // Check if this is the very first message in the chat history
+                const isFirstMessage = chat.messages.filter(m => m.sender === 'customer').length <= 1;
+                
+                let response = "";
+
+                // 1. Initial Greeting + Workflow (Always on first msg or greeting keywords)
+                if (isFirstMessage || greetingKeywords.includes(normalizedMsg)) {
+                    response = "Hello! 👋 Welcome to our business.\n\nI am your automated assistant. How can I help you today? Please choose an option or type any question:\n\n1️⃣ About Services\n2️⃣ Pricing Plans\n3️⃣ Talk to AI Expert";
+                } 
+                // 2. Specific Workflow Options
+                else if (normalizedMsg === '1' || normalizedMsg.includes('service')) {
+                    response = "We provide premium AI-powered WhatsApp automation. 🚀 Our bots can handle customer support, sales, and document queries 24/7.";
+                }
+                else if (normalizedMsg === '2' || normalizedMsg.includes('pricing')) {
+                    response = "Our subscription plans are flexible for every business. 📊 Please let me know your requirements, or ask me about specific features!";
+                }
+                // 3. Smart AI Fallback (For everything else)
+                else {
+                    console.log(`[AI Fallback] Processing query: ${text}`);
+                    response = await rag.query(clientId, text);
+                }
 
                 try {
                     await axios.post('https://api.interakt.ai/v1/public/message/', {
