@@ -489,16 +489,15 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             const response = await rag.query(clientId, text);
             console.log(`✨ [WEBHOOK] AI Response generated: "${response.substring(0, 30)}..."`);
 
-            // 3. Send response via Interakt API
-            try {
-                console.log('📤 [WEBHOOK] Sending to Interakt API...');
+                // 3. Send response via Interakt API
+                try {
+                    console.log('📤 [WEBHOOK] Sending to Interakt API...');
+                    const formattedPhone = customerPhone;
 
-                const formattedPhone = customerPhone;
+                    // Update Deduplication Cache BEFORE sending to prevent race condition
+                    lastBotMessages.set(`${clientId}_${customerPhone}`, response);
 
-                console.log(`📱 [WEBHOOK] Target Phone: ${formattedPhone}`);
-
-                // Try with the structure that got past the "data is required" check
-                const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
+                    const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
                     fullPhoneNumber: formattedPhone,
                     type: 'Text',
                     data: {
@@ -512,6 +511,14 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 // 4. Log bot message
                 chat.messages.push({ sender: 'bot', text: response });
                 await chat.save();
+
+                // Clear cache after 30 seconds
+                setTimeout(() => {
+                    const key = `${clientId}_${customerPhone}`;
+                    if (lastBotMessages.get(key) === response) {
+                        lastBotMessages.delete(key);
+                    }
+                }, 30000);
             } catch (apiErr) {
                 console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
 

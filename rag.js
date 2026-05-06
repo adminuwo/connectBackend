@@ -174,7 +174,7 @@ class SimpleRAG {
             Use the following context from the business's knowledge base to answer the customer.
             If the answer is not in the context, provide a polite general response based on your knowledge.
             Keep the tone professional and friendly.
-            IMPORTANT: Provide the response in a single, concise paragraph. Avoid long lists or multiple paragraphs.
+            IMPORTANT: Provide the response in a single, concise paragraph. Avoid long lists or multiple paragraphs. Do NOT use newlines or multiple blocks of text. Everything must be in one continuous block.
 
             CONTEXT:
             ${context || 'No specific context found.'}
