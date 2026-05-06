@@ -230,21 +230,26 @@ const createProxy = (instance) => {
     });
 };
 
-const Client = MongooseClient;
-const Ticket = MongooseTicket;
-const Chat = MongooseChat;
-const OTP = MongooseOTP;
+let dbMode = 'json'; // Default to json until connected
 
 console.log('🔄 [DB] Attempting to connect to MongoDB Atlas...');
+mongoose.set('bufferCommands', false); // CRITICAL: Stop buffering to prevent hangs
 mongoose.connect(process.env.MONGODB_URI, {
-    serverSelectionTimeoutMS: 30000,
-    socketTimeoutMS: 45000,
-    family: 4
-})
-.then(() => console.log('✅ [DB] Connected to MongoDB (Live Mode)'))
-.catch(err => {
+    serverSelectionTimeoutMS: 5000, // Fail fast (5s)
+    connectTimeoutMS: 5000,
+}).then(() => {
+    console.log('✅ [DB] Connected to MongoDB Atlas');
+    dbMode = 'atlas';
+}).catch(err => {
     console.error('❌ [DB] MongoDB Connection Error:', err.message);
-    console.log('⚠️ [DB] STRICT MODE: Connection failed. Check Atlas IP Whitelist (0.0.0.0/0).');
+    console.log('🏠 [DB] Falling back to Local JSON mode safely.');
+    dbMode = 'json';
 });
 
-module.exports = { Client, Ticket, Chat, OTP, isLocal: () => false };
+module.exports = { 
+    get Client() { return dbMode === 'atlas' ? MongooseClient : JsonClient; },
+    get Ticket() { return dbMode === 'atlas' ? MongooseTicket : JsonTicket; },
+    get Chat() { return dbMode === 'atlas' ? MongooseChat : JsonChat; },
+    get OTP() { return dbMode === 'atlas' ? MongooseOTP : JsonOTP; },
+    isLocal: () => dbMode === 'json'
+};
