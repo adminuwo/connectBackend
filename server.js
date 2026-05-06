@@ -485,6 +485,12 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         if (processedMessageIds.size > 1000) processedMessageIds.delete(processedMessageIds.values().next().value);
 
         try {
+            const client = await Client.findById(clientId);
+            if (!client || !client.botEnabled) {
+                console.log(`ℹ️ [WEBHOOK] Bot disabled or client not found for ${clientId}`);
+                return;
+            }
+
             let chat = await Chat.findOne({ clientId, customerPhone });
             if (!chat) {
                 chat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
