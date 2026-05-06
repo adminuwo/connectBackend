@@ -5,7 +5,6 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const axios = require('axios');
-const OpenAI = require('openai');
 
 // For deduplication
 const lastBotMessages = new Map(); // clientId_phone -> lastMessageText
