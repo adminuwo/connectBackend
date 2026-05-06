@@ -230,10 +230,21 @@ const createProxy = (instance) => {
     });
 };
 
-module.exports = {
-    Client: useLocal ? createProxy(JsonClient) : MongooseClient,
-    Ticket: useLocal ? createProxy(JsonTicket) : MongooseTicket,
-    Chat: useLocal ? createProxy(JsonChat) : MongooseChat,
-    OTP: useLocal ? createProxy(JsonOTP) : MongooseOTP,
-    isLocal: useLocal
-};
+const Client = MongooseClient;
+const Ticket = MongooseTicket;
+const Chat = MongooseChat;
+const OTP = MongooseOTP;
+
+console.log('🔄 [DB] Attempting to connect to MongoDB Atlas...');
+mongoose.connect(process.env.MONGODB_URI, {
+    serverSelectionTimeoutMS: 30000,
+    socketTimeoutMS: 45000,
+    family: 4
+})
+.then(() => console.log('✅ [DB] Connected to MongoDB (Live Mode)'))
+.catch(err => {
+    console.error('❌ [DB] MongoDB Connection Error:', err.message);
+    console.log('⚠️ [DB] STRICT MODE: Connection failed. Check Atlas IP Whitelist (0.0.0.0/0).');
+});
+
+module.exports = { Client, Ticket, Chat, OTP, isLocal: () => false };

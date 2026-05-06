@@ -169,13 +169,8 @@ app.post('/api/auth/send-otp', async (req, res) => {
     const { email } = req.body;
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     try {
-        const otpData = { email, otp };
-        if (isLocal) {
-            await OTP.findOneAndUpdate({ email }, otpData, { upsert: true });
-        } else {
-            const newOtp = new OTP(otpData);
-            await newOtp.save();
-        }
+        const newOtp = new OTP({ email, otp });
+        await newOtp.save();
         console.log(`[OTP] Sent to ${email}: ${otp}`);
         res.json({ success: true, message: 'OTP sent' });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -190,13 +185,8 @@ app.post('/api/auth/register', async (req, res) => {
         const existing = await Client.findOne({ email });
         if (existing) return res.status(400).json({ error: 'Email already registered' });
 
-        const clientData = { name, email, password, whatsappNumber, businessName, businessType, status: 'pending' };
-        if (isLocal) {
-            await Client.findOneAndUpdate({ email }, clientData, { upsert: true });
-        } else {
-            const client = new Client(clientData);
-            await client.save();
-        }
+        const client = new Client({ name, email, password, whatsappNumber, businessName, businessType, status: 'pending' });
+        await client.save();
         await OTP.deleteOne({ email });
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -339,11 +329,7 @@ app.post('/api/support/send', async (req, res) => {
         ticket.lastUpdate = new Date();
         ticket.status = 'open';
         
-        if (isLocal) {
-            await Ticket.findOneAndUpdate({ clientId }, { messages: ticket.messages, lastUpdate: ticket.lastUpdate, status: ticket.status });
-        } else {
-            await ticket.save();
-        }
+        await ticket.save();
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -362,12 +348,8 @@ app.post('/api/admin/clients/create', async (req, res) => {
             status: 'approved' // Admin created clients are pre-approved
         };
 
-        if (isLocal) {
-            await Client.findOneAndUpdate({ email }, clientData, { upsert: true });
-        } else {
-            const client = new Client(clientData);
-            await client.save();
-        }
+        const client = new Client(clientData);
+        await client.save();
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -489,17 +471,10 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         
         console.log(`💬 [WEBHOOK] From: ${customerPhone} | Text: ${text}`);
 
-        // 1. Initialize or Update Chat Record Safely
+        // 1. Initialize Chat
         if (!chat) {
-            const initialChat = { clientId, customerPhone, messages: [], lastUpdate: new Date() };
-            if (isLocal) {
-                // For JSON DB, we need to create it in the array
-                await Chat.findOneAndUpdate({ clientId, customerPhone }, initialChat, { upsert: true });
-                chat = await Chat.findOne({ clientId, customerPhone });
-            } else {
-                chat = new Chat(initialChat);
-                await chat.save();
-            }
+            chat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
+            await chat.save();
         }
         
         // Add current message to history
@@ -507,11 +482,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         chat.messages.push({ sender: 'customer', text });
         chat.lastUpdate = new Date();
         
-        if (isLocal) {
-            await Chat.findOneAndUpdate({ clientId, customerPhone }, { messages: chat.messages, lastUpdate: chat.lastUpdate });
-        } else {
-            await chat.save();
-        }
+        await chat.save();
 
         // 2. Get AI Response
         if (openai && text !== "Media/Unsupported message") {
@@ -537,11 +508,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                 // 4. Log bot message
                 chat.messages.push({ sender: 'bot', text: response });
-                if (isLocal) {
-                    await Chat.findOneAndUpdate({ clientId, customerPhone }, { messages: chat.messages });
-                } else {
-                    await chat.save();
-                }
+                await chat.save();
             } catch (apiErr) {
                 console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
 
