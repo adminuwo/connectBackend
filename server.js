@@ -7,7 +7,10 @@ const multer = require('multer');
 const axios = require('axios');
 
 // For deduplication
-const lastBotMessages = new Map(); // clientId_phone -> lastMessageText
+const lastBotMessages = new Map();
+const processedMessageIds = new Set(); // To prevent processing retried webhooks
+const inFlightRequests = new Set(); // To prevent concurrent processing for same phone
+ // clientId_phone -> lastMessageText
 
 // Configure storage for uploads
 const storage = multer.diskStorage({
@@ -462,107 +465,67 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
         if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
 
-        if (!text) {
-            console.log('ℹ️ [WEBHOOK] Empty message text, ignoring.');
+        if (!text) return res.sendStatus(200);
+
+        // --- ASYNC PROCESSING ---
+        const messageId = message.id || "no-id";
+        const lockKey = `${clientId}_${customerPhone}`;
+
+        // Stop retries & duplicates
+        if (processedMessageIds.has(messageId) || inFlightRequests.has(lockKey)) {
+            console.log(`ℹ️ [WEBHOOK] Ignoring duplicate or in-flight message.`);
             return res.sendStatus(200);
         }
 
-        console.log(`📡 [WEBHOOK] Processing for ${client.name}. Bot Enabled: ${client.botEnabled}`);
-        if (!client.botEnabled) return res.sendStatus(200);
-
-        if (customerPhone === "unknown") {
-            console.log('⚠️ [WEBHOOK] Skipping: No customer phone found');
-            return res.sendStatus(200);
-        }
-
-        // --- DATABASE LEVEL LOOP PREVENTION & CHAT INIT ---
-        let chat = await Chat.findOne({ clientId, customerPhone });
-        
-        if (chat && chat.messages && chat.messages.length > 0) {
-            const lastMsg = chat.messages[chat.messages.length - 1];
-            if (lastMsg.sender === 'bot') {
-                const isEcho = text.startsWith(lastMsg.text.substring(0, 30)) || lastMsg.text.startsWith(text.substring(0, 30));
-                if (isEcho) {
-                    console.log('ℹ️ [WEBHOOK] DB Echo detected. Ignoring.');
-                    return res.sendStatus(200);
-                }
-            }
-        }
-        
-        console.log(`💬 [WEBHOOK] From: ${customerPhone} | Text: ${text}`);
-
-        // 1. Initialize Chat
-        if (!chat) {
-            chat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
-            await chat.save();
-        }
-        
-        // Add current message to history
-        if (!chat.messages) chat.messages = [];
-        chat.messages.push({ sender: 'customer', text });
-        chat.lastUpdate = new Date();
-        
-        await chat.save();
-
-        // 2. Get AI Response
-        if (openai && text !== "Media/Unsupported message") {
-            console.log('🤖 [WEBHOOK] Calling RAG Query...');
-            const response = await rag.query(clientId, text);
-            console.log(`✨ [WEBHOOK] AI Response generated: "${response.substring(0, 30)}..."`);
-
-                // 3. Send response via Interakt API
-                try {
-                    console.log('📤 [WEBHOOK] Sending to Interakt API...');
-                    const formattedPhone = customerPhone;
-
-                    const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
-                    fullPhoneNumber: formattedPhone,
-                    type: 'Text',
-                    data: {
-                        message: response
-                    }
-                }, {
-                    headers: { 'Authorization': `Basic ${client.apiKey}` }
-                });
-                console.log('✅ [WEBHOOK] Interakt Response:', interaktRes.status);
-
-                // 4. Log bot message
-                chat.messages.push({ sender: 'bot', text: response });
-                await chat.save();
-            } catch (apiErr) {
-                console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
-
-                // Final fallback attempt with the other common structure
-                if (apiErr.response?.status === 400) {
-                    console.log('🔄 [WEBHOOK] Retrying...');
-                    try {
-                        const formattedPhone = customerPhone;
-
-                        await axios.post('https://api.interakt.ai/v1/public/message/', {
-                            fullPhoneNumber: formattedPhone,
-                            type: 'Text',
-                            data: {
-                                message: response
-                            }
-                        }, {
-                            headers: { 'Authorization': `Basic ${client.apiKey}` }
-                        });
-                        console.log('✅ [WEBHOOK] Interakt Retry Success');
-                        chat.messages.push({ sender: 'bot', text: response });
-                        await chat.save();
-                    } catch (err2) {
-                        console.error('❌ [WEBHOOK] All send attempts failed.');
-                    }
-                }
-            }
-        } else {
-            console.log(`⚠️ [WEBHOOK] AI skipped. OpenAI Ready: ${!!openai} | Text valid: ${text !== "Media/Unsupported message"}`);
-        }
-
+        // Send 200 OK immediately
         res.sendStatus(200);
+
+        processedMessageIds.add(messageId);
+        inFlightRequests.add(lockKey);
+        if (processedMessageIds.size > 1000) processedMessageIds.delete(processedMessageIds.values().next().value);
+
+        try {
+            let chat = await Chat.findOne({ clientId, customerPhone });
+            if (!chat) {
+                chat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
+            }
+            
+            // Deduplicate echo before processing
+            if (chat.messages.length > 0) {
+                const lastMsg = chat.messages[chat.messages.length - 1];
+                if (lastMsg.sender === 'bot' && (text.startsWith(lastMsg.text.substring(0, 30)) || lastMsg.text.startsWith(text.substring(0, 30)))) {
+                    return; 
+                }
+            }
+
+            chat.messages.push({ sender: 'customer', text });
+            chat.lastUpdate = new Date();
+            await chat.save();
+
+            if (openai && text !== "Media/Unsupported message") {
+                const response = await rag.query(clientId, text);
+
+                    await axios.post('https://api.interakt.ai/v1/public/message/', {
+                        fullPhoneNumber: customerPhone,
+                        type: 'Text',
+                        text: response
+                    }, {
+                        headers: { 'Authorization': `Basic ${client.apiKey}` }
+                    });
+
+                    chat.messages.push({ sender: 'bot', text: response });
+                    await chat.save();
+                } catch (apiErr) {
+                    console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
+                }
+            }
+        } catch (err) {
+            console.error('❌ [WEBHOOK ERROR]', err.message);
+        } finally {
+            inFlightRequests.delete(lockKey);
+        }
     } catch (err) {
         console.error('💥 [WEBHOOK CRITICAL ERROR]', err.message);
-        res.sendStatus(200);
     }
 });
 
