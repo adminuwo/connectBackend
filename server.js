@@ -600,27 +600,27 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             if (openai && text !== "Media/Unsupported message") {
                 const normalizedMsg = text.toLowerCase().trim();
-                const greetingKeywords = ['hi', 'hello', 'hey', 'start', 'namaste', 'aslam', 'help', 'ji', 'hye'];
+                const greetingKeywords = ['hi', 'hello', 'hey', 'start', 'namaste', 'aslam', 'help', 'ji', 'hye', 'hy', 'hola'];
+                const workflowOptions = ['1', '2', 'services', 'pricing', 'plans'];
                 
-                // Check if this is the very first message in the chat history
                 const isFirstMessage = chat.messages.filter(m => m.sender === 'customer').length <= 1;
-                
                 let response = "";
 
-                // 1. Initial Greeting + Workflow (Always on first msg or greeting keywords)
+                // 1. Initial Greeting + Workflow
                 if (isFirstMessage || greetingKeywords.includes(normalizedMsg)) {
-                    response = "Hello! 👋 Welcome to our business.\n\nI am your automated assistant. How can I help you today? Please choose an option or type any question:\n\n1️⃣ About Services\n2️⃣ Pricing Plans\n3️⃣ Talk to AI Expert";
+                    response = "Hello! 👋 Welcome to our business.\n\nI am your automated assistant. How can I help you today? Please choose an option or type any question:\n\n1️⃣ *About Services*\n2️⃣ *Pricing Plans*\n3️⃣ *Talk to AI Expert*";
                 } 
-                // 2. Specific Workflow Options
+                // 2. Workflow Option 1
                 else if (normalizedMsg === '1' || normalizedMsg.includes('service')) {
-                    response = "We provide premium AI-powered WhatsApp automation. 🚀 Our bots can handle customer support, sales, and document queries 24/7.";
+                    response = "We provide premium *AI-powered WhatsApp automation*. 🚀 Our bots can handle customer support, sales, and document queries 24/7. Type any question to see me in action!";
                 }
-                else if (normalizedMsg === '2' || normalizedMsg.includes('pricing')) {
+                // 3. Workflow Option 2
+                else if (normalizedMsg === '2' || normalizedMsg.includes('pricing') || normalizedMsg.includes('plan')) {
                     response = "Our subscription plans are flexible for every business. 📊 Please let me know your requirements, or ask me about specific features!";
                 }
-                // 3. Smart AI Fallback (For everything else)
+                // 4. Smart AI Fallback (For everything else, including Option 3)
                 else {
-                    console.log(`[AI Fallback] Processing query: ${text}`);
+                    console.log(`🧠 [AI ACTIVATE] Processing query: ${text}`);
                     response = await rag.query(clientId, text);
                 }
 
