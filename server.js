@@ -607,11 +607,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 let response = "";
 
                 // 1. Initial Greeting + Workflow (ALWAYS on first message)
-                if (isFirstMessage || greetingKeywords.some(k => normalizedMsg.includes(k))) {
-                    response = "Hello! 👋 Welcome to our business.\n\nI am your automated assistant. How can I help you today? Please choose an option or type any question:\n\n1️⃣ *About Services*\n2️⃣ *Pricing Plans*\n3️⃣ *Talk to AI Expert*";
-                } 
+                // if (isFirstMessage || greetingKeywords.some(k => normalizedMsg.includes(k))) {
+                //     response = "Hello! 👋 Welcome to our business.\n\nI am your automated assistant. How can I help you today? Please choose an option or type any question:\n\n1️⃣ *About Services*\n2️⃣ *Pricing Plans*\n3️⃣ *Talk to AI Expert*";
+                // } 
                 // 2. Workflow Option 1 (Services)
-                else if (normalizedMsg === '1' || normalizedMsg.includes('service') || normalizedMsg.includes('about services')) {
+                if (normalizedMsg === '1' || normalizedMsg.includes('service') || normalizedMsg.includes('about services')) {
                     response = "We provide premium *AI-powered WhatsApp automation*. 🚀 Our bots can handle customer support, sales, and document queries 24/7. Type any question to see me in action!";
                 }
                 // 3. Workflow Option 2 (Pricing)
