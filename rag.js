@@ -11,6 +11,7 @@ class SimpleRAG {
         this.openai = openai;
         this.clientChunks = {}; // Store { clientId: [{ text: string, embedding: number[] }] }
         this.baseKbPath = path.join(__dirname, 'knowledge_base');
+        this.embeddingCache = new Map(); // Simple cache for query embeddings
     }
 
     // Initialize and load knowledge base for all clients
@@ -22,10 +23,16 @@ class SimpleRAG {
         const clientFolders = fs.readdirSync(this.baseKbPath).filter(f => fs.lstatSync(path.join(this.baseKbPath, f)).isDirectory());
         
         for (const folderName of clientFolders) {
-            // Extract ID from Name_ID format
+            // Standardize: Extract ID from Name_ID or use folder as ID if no underscore
             const parts = folderName.split('_');
-            const clientId = parts[parts.length - 1]; // Assume ID is always the last part
+            const clientId = parts[parts.length - 1];
             
+            // Avoid duplicate loading if we have both 'ID' and 'Name_ID' folders
+            if (folderName === clientId && clientFolders.some(f => f.endsWith(`_${clientId}`) && f !== clientId)) {
+                console.log(`[RAG] 🧹 Skipping redundant ID-only folder: ${folderName}`);
+                continue;
+            }
+
             console.log(`[RAG] 📁 Loading knowledge from: ${folderName} (ID: ${clientId})`);
             await this.loadClientKnowledge(folderName, clientId);
         }
@@ -73,37 +80,32 @@ class SimpleRAG {
 
         console.log(`[RAG] 📂 Client ${clientId}: Found ${files.length} supported files.`);
 
-        let allText = '';
         for (const file of files) {
-            console.log(`[RAG] 📄 Extracting text from: ${file}...`);
+            console.log(`[RAG] 📄 Processing: ${file}...`);
             const content = await this.extractTextFromFile(path.join(clientPath, file));
-            console.log(`[RAG] ℹ️ Extracted ${content.length} characters from ${file}`);
-            allText += content + '\n\n';
-        }
+            if (!content || content.trim().length === 0) continue;
 
-        if (allText.trim().length === 0) {
-            console.log(`[RAG] ⚠️ No text found in any documents for client ${clientId}`);
-            return;
-        }
+            const rawChunks = this.chunkText(content, 800);
+            console.log(`[RAG] ✂️ Split ${file} into ${rawChunks.length} chunks.`);
 
-        const rawChunks = this.chunkText(allText, 800);
-        console.log(`[RAG] ✂️ Split text into ${rawChunks.length} chunks.`);
-        
-        for (let i = 0; i < rawChunks.length; i++) {
-            const chunk = rawChunks[i];
-            if (chunk.trim().length === 0) continue;
-            
-            if (!this.openai) {
-                console.warn(`[RAG] ⚠️ Skipping embedding for chunk ${i+1}: OpenAI client not initialized.`);
-                continue;
-            }
+            for (let i = 0; i < rawChunks.length; i++) {
+                let chunk = rawChunks[i].trim();
+                if (!chunk) continue;
+                
+                // Add Source Metadata to the chunk text
+                const chunkWithMeta = `[Source Document: ${file}]\n${chunk}`;
 
-            try {
-                process.stdout.write(`[RAG] 🧠 Generating embedding ${i+1}/${rawChunks.length}... \r`);
-                const embedding = await this.getEmbedding(chunk);
-                this.clientChunks[clientId].push({ text: chunk, embedding });
-            } catch (err) {
-                console.error(`\n[RAG] ❌ Embedding Error for client ${clientId} (Chunk ${i}):`, err.message);
+                try {
+                    process.stdout.write(`[RAG] 🧠 Embedding ${file} (Part ${i+1}/${rawChunks.length})... \r`);
+                    const embedding = await this.getEmbedding(chunkWithMeta);
+                    this.clientChunks[clientId].push({ 
+                        text: chunkWithMeta, 
+                        embedding,
+                        source: file
+                    });
+                } catch (err) {
+                    console.error(`\n[RAG] ❌ Embedding Error for ${file}:`, err.message);
+                }
             }
         }
         console.log(`\n[RAG] ✨ Client ${clientId} is ready with ${this.clientChunks[clientId].length} vector chunks.`);
@@ -138,11 +140,20 @@ class SimpleRAG {
     }
 
     async getEmbedding(text) {
+        const cacheKey = text.trim().toLowerCase();
+        if (this.embeddingCache.has(cacheKey)) return this.embeddingCache.get(cacheKey);
+
         const response = await this.openai.embeddings.create({
             model: 'text-embedding-3-small',
             input: text
         });
-        return response.data[0].embedding;
+        const embedding = response.data[0].embedding;
+        
+        // Cache management (limit size to 500 entries)
+        if (this.embeddingCache.size > 500) this.embeddingCache.delete(this.embeddingCache.keys().next().value);
+        this.embeddingCache.set(cacheKey, embedding);
+        
+        return embedding;
     }
 
     cosineSimilarity(vecA, vecB) {
@@ -157,7 +168,7 @@ class SimpleRAG {
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    async search(clientId, query, topK = 3) {
+    async search(clientId, query, topK = 5) {
         const chunks = this.clientChunks[clientId];
         if (!chunks || chunks.length === 0) return '';
 
@@ -181,23 +192,24 @@ class SimpleRAG {
         
         try {
             const context = await this.search(clientId, userQuery);
-            const systemPrompt = `You are an elite, highly persuasive sales consultant and AI business partner. 
-            Your goal is to provide professional, clear, and extremely convincing responses that drive sales and user engagement.
+            const systemPrompt = `You are *Antigravity AI*, an elite, high-performance sales strategist and business consultant. 
+            Your mission is to provide world-class, extremely persuasive, and polished responses that WOW the user and drive high-value sales.
 
-            STRATEGIC GUIDELINES:
-            - **Be Convincing**: Highlight key benefits, ROI, and unique selling points (USPs) of the products (e.g., AI Legal, AI Ads).
-            - **Sales-Driven**: Always nudge the user toward a positive action (booking, buying, or inquiring more) with a strong Call to Action (CTA).
-            - **Professional Tone**: Stay sophisticated yet accessible. Use a consultative approach.
+            💎 **THE ANTIGRAVITY PERSONA**:
+            - **Elite & Sophisticated**: Speak with the authority of a top-tier consultant. You are not just a bot; you are a strategic partner.
+            - **Hyper-Convincing**: Focus on ROI, benefits, and the "unfair advantage" the client gets by using these services.
+            - **Radiant Energy**: Be warm, professional, and high-energy. Use vibrant emojis (2-4 per response) to highlight key points, but keep it classy.
+            - **Strategic Formatting**: Use clean spacing, bold terms (*bold text*), and bullet points to make the response extremely easy to read on mobile.
 
-            - **Professional Tone**: Sophisticated, elite, and conversational. Speak like a high-end consultant.
-            - **Alignment & Readability**: Ensure the response is perfectly formatted for mobile viewing.
-            - **Spacing**: Use double newlines (\n\n) between paragraphs or different sections. NEVER send a single long block of text.
-            - **Bolding**: Use *asterisks* to bold key terms, names, or important benefits (e.g., *AI ADS Agent™*).
-            - **Lists**: If listing features, use clean bullet points (•) and keep them concise.
-            - **Emojis**: Use emojis balancedly (1-3 per response) to stay engaging but professional.
-            - **Final CTA**: Always put your closing question or Call to Action on its own separate line at the end.
+            ✨ **STYLE GUIDELINES**:
+            - **Opening**: Acknowledge the user warmly (e.g., "Great question!", "I'd be happy to explain the power of...").
+            - **Core Value**: Always link your answer back to how it helps the user scale or save time.
+            - **Visuals**: Use icons like 🚀, ⚡, 💎, ✅, or 📈 to draw attention to key benefits.
+            - **Closing**: Always end with a powerful, singular Call to Action (CTA) or a provocative question on its own separate line.
 
-            If information is missing from the context, use your expert AI knowledge to provide a compelling and logical sales response.
+            🛠️ **CONTEXTUAL INTELLIGENCE**:
+            - **Source Respect**: Pay close attention to the [Source Document: filename] tags. Prioritize information from the most relevant file.
+            - **Expert Fallback**: If information is missing from the context, use your deep AI business knowledge to craft a logical, professional, and sales-oriented answer. Never say "I don't know" in a dry way; instead, offer a consultative bridge.
 
             CONTEXT:
             ${context || 'No specific context found.'}
@@ -209,13 +221,13 @@ class SimpleRAG {
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userQuery }
                 ],
-                temperature: 0.8
+                temperature: 0.75
             });
 
             return completion.choices[0].message.content;
         } catch (err) {
             console.error('[RAG QUERY ERROR]', err.message);
-            return "I'm having trouble processing that right now. Please try again later.";
+            return "I'm experiencing a brief technical glitch. Please give me a moment and try again! 🚀";
         }
     }
 

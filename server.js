@@ -466,9 +466,11 @@ app.post('/api/admin/clients/create', async (req, res) => {
 
 app.get('/api/admin/clients', async (req, res) => {
     try {
-        let clients = await Client.find({});
-        // Filter out admins manually for compatibility with JSON mock
-        clients = clients.filter(c => c.role !== 'admin' && !c.isAdmin);
+        let allUsers = await Client.find({});
+        const clients = allUsers.filter(u => {
+            const isAdm = u.role === 'admin' || u.isAdmin === true || u.email === 'admin@uwo24.com';
+            return !isAdm;
+        });
         
         res.json(clients.map(c => ({
             ...c.toObject ? c.toObject() : c,
@@ -517,16 +519,34 @@ app.post('/api/admin/support/reply', async (req, res) => {
 
 app.get('/api/admin/stats', async (req, res) => {
     try {
-        const clients = await Client.find({});
-        const approved = clients.filter(c => c.status === 'approved');
+        let allUsers = await Client.find({});
+        
+        // Strictly filter out anyone who is an admin
+        const clients = allUsers.filter(u => {
+            const email = (u.email || "").toLowerCase().trim();
+            const role = (u.role || "").toLowerCase().trim();
+            const isAdmin = u.isAdmin === true || u.isAdmin === "true";
+            
+            const isAdm = role === 'admin' || isAdmin || email === 'admin@uwo24.com';
+            return !isAdm;
+        });
+        
+        const approved = clients.filter(c => (c.status || "").toLowerCase() === 'approved');
+        const pending = clients.filter(c => (c.status || "").toLowerCase() === 'pending');
         const totalDocs = clients.reduce((acc, c) => acc + (c.documents || []).length, 0);
+
+        console.log(`📊 [STATS] Total: ${clients.length}, Approved: ${approved.length}, Pending: ${pending.length}`);
+
         res.json({
             totalClients: clients.length,
-            pendingApprovals: clients.filter(c => c.status === 'pending').length,
+            pendingApprovals: pending.length,
             approvedClients: approved.length,
             totalDocs: totalDocs
         });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error('Stats Error:', err.message);
+        res.status(500).json({ error: 'Failed to load stats' }); 
+    }
 });
 
 // --- WEBHOOK FOR INTERAKT ---
@@ -574,91 +594,75 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         if (processedMessageIds.size > 1000) processedMessageIds.delete(processedMessageIds.values().next().value);
 
         try {
-            const client = await Client.findById(clientId);
-            if (!client || !client.botEnabled) {
-                console.log(`ℹ️ [WEBHOOK] Bot disabled or client not found for ${clientId}`);
+            // REUSE 'client' fetched at start of route (line 539)
+            if (!client.botEnabled) {
+                console.log(`ℹ️ [WEBHOOK] Bot disabled for ${clientId}`);
                 return;
             }
 
-            // --- AUDIO TRANSCRIPTION ---
-            if ((msgType === 'Audio' || msgType === 'audio') && openai) {
-                const audioUrl = message.attachment?.url;
-                if (audioUrl) {
-                    try {
-                        console.log(`🎙️ [AUDIO] Processing audio from ${customerPhone}...`);
-                        const audioResponse = await axios({ url: audioUrl, method: 'GET', responseType: 'stream' });
-                        const tempDir = path.join(__dirname, 'temp_audio');
-                        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-                        const tempPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
-                        const writer = fs.createWriteStream(tempPath);
-                        audioResponse.data.pipe(writer);
-                        await new Promise((resolve, reject) => {
-                            writer.on('finish', resolve);
-                            writer.on('error', reject);
-                        });
-
-                        const transcription = await openai.audio.transcriptions.create({
-                            file: fs.createReadStream(tempPath),
-                            model: "whisper-1",
-                        });
-                        text = transcription.text;
-                        console.log(`🎙️ [AUDIO] Transcribed: ${text}`);
-                        fs.unlinkSync(tempPath);
-                    } catch (audioErr) {
-                        console.error('❌ [AUDIO ERROR]', audioErr.message);
+            // --- PARALLEL: Audio Transcription + Chat Lookup ---
+            const [transcribedText, chat] = await Promise.all([
+                (async () => {
+                    if ((msgType === 'Audio' || msgType === 'audio') && openai) {
+                        const audioUrl = message.attachment?.url;
+                        if (!audioUrl) return text;
+                        try {
+                            const audioResponse = await axios({ url: audioUrl, method: 'GET', responseType: 'stream' });
+                            const tempPath = path.join(__dirname, 'temp_audio', `audio_${Date.now()}.ogg`);
+                            if (!fs.existsSync(path.dirname(tempPath))) fs.mkdirSync(path.dirname(tempPath), { recursive: true });
+                            const writer = fs.createWriteStream(tempPath);
+                            audioResponse.data.pipe(writer);
+                            await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
+                            const transcription = await openai.audio.transcriptions.create({ file: fs.createReadStream(tempPath), model: "whisper-1" });
+                            fs.unlink(tempPath, () => {}); // Background cleanup
+                            return transcription.text;
+                        } catch (e) { console.error('❌ [AUDIO ERR]', e.message); return text; }
                     }
-                }
-            }
+                    return text;
+                })(),
+                Chat.findOne({ clientId, customerPhone })
+            ]);
 
+            text = transcribedText;
             if (!text || text === "Media/Unsupported message") return;
 
-            let chat = await Chat.findOne({ clientId, customerPhone });
-            if (!chat) {
-                chat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
-            }
+            // Initialize or update chat object
+            let activeChat = chat || new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
             
-            // Deduplicate echo before processing
-            if (chat.messages.length > 0) {
-                const lastMsg = chat.messages[chat.messages.length - 1];
-                if (lastMsg.sender === 'bot' && (text.startsWith(lastMsg.text.substring(0, 30)) || lastMsg.text.startsWith(text.substring(0, 30)))) {
-                    return; 
-                }
+            // Fast Echo Check
+            if (activeChat.messages.length > 0) {
+                const lastMsg = activeChat.messages[activeChat.messages.length - 1];
+                if (lastMsg.sender === 'bot' && (text.startsWith(lastMsg.text.substring(0, 20)) || lastMsg.text.startsWith(text.substring(0, 20)))) return;
             }
 
-            chat.messages.push({ sender: 'customer', text });
-            chat.lastUpdate = new Date();
-            await chat.save();
+            activeChat.messages.push({ sender: 'customer', text });
+            activeChat.lastUpdate = new Date();
+            
+            // --- BACKGROUND SAVE + AI PROCESS ---
+            // Don't wait for first save to start AI
+            activeChat.save().catch(e => console.error('❌ [SAVE ERR]', e.message));
 
             if (openai) {
                 const normalizedMsg = text.toLowerCase().trim();
                 const triggerRegex = /^(hy|h|hye|hi|hii|hello|hey|hie|hye|hiii|heyy|namaste|aslam|ji|start|help)$/i;
-                
-                // 1. Strict Workflow Trigger Check (Let Interakt handle these)
-                if (triggerRegex.test(normalizedMsg) || normalizedMsg.length <= 1) {
-                    console.log(`[WORKFLOW PRIORITY] Ignoring trigger: ${normalizedMsg}`);
-                    return; 
-                } 
-                
-                // 2. For everything else, use AI Bot
-                console.log(`🧠 [AI ACTIVATE] Processing query: ${text}`);
-                let response = await rag.query(clientId, text);
+                if (triggerRegex.test(normalizedMsg) || normalizedMsg.length <= 1) return;
 
-                try {
-                    await axios.post('https://api.interakt.ai/v1/public/message/', {
+                console.log(`🧠 [AI] Processing: ${text}`);
+                const response = await rag.query(clientId, text);
+
+                // --- SEND & FINAL SAVE ---
+                await Promise.all([
+                    axios.post('https://api.interakt.ai/v1/public/message/', {
                         fullPhoneNumber: customerPhone,
                         type: 'Text',
-                        data: {
-                            message: response
-                        }
-                    }, {
-                        headers: { 'Authorization': `Basic ${client.apiKey}` }
-                    });
-
-                    chat.messages.push({ sender: 'bot', text: response });
-                    await chat.save();
-                } catch (apiErr) {
-                    console.error('❌ [WEBHOOK API ERROR]', apiErr.response?.data || apiErr.message);
-                }
+                        data: { message: response }
+                    }, { headers: { 'Authorization': `Basic ${client.apiKey}` } }),
+                    (async () => {
+                        activeChat.messages.push({ sender: 'bot', text: response });
+                        activeChat.lastUpdate = new Date();
+                        await activeChat.save();
+                    })()
+                ]);
             }
         } catch (err) {
             console.error('❌ [WEBHOOK ERROR]', err.message);
