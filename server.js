@@ -603,7 +603,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     const isAudio = msgType.toLowerCase() === 'audio' || msgType.toLowerCase() === 'voice';
                     if (isAudio && openai) {
                         console.time(`🎙️ [WHISPER] ${customerPhone}`);
-                        const audioUrl = message.attachment?.url || message.media?.url;
+                        const audioUrl = message.attachment?.url || message.media?.url || message.media_url;
                         if (!audioUrl) return text;
                         try {
                             const audioResponse = await axios({ url: audioUrl, method: 'GET', responseType: 'stream' });
