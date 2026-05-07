@@ -607,7 +607,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 let response = "";
 
                 // 1. Initial Greeting + Workflow
-                if (isFirstMessage || greetingKeywords.includes(normalizedMsg)) {
+                if (isFirstMessage || greetingKeywords.some(k => normalizedMsg.includes(k))) {
                     response = "Hello! 👋 Welcome to our business.\n\nI am your automated assistant. How can I help you today? Please choose an option or type any question:\n\n1️⃣ *About Services*\n2️⃣ *Pricing Plans*\n3️⃣ *Talk to AI Expert*";
                 } 
                 // 2. Workflow Option 1
