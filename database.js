@@ -245,7 +245,6 @@ let dbMode = isProduction ? 'atlas' : 'json';
 const connectDB = async () => {
     if (isProduction || process.env.DB_MODE === 'atlas') {
         console.log('🔄 [DB] Production Mode: Connecting to MongoDB Atlas...');
-        mongoose.set('bufferCommands', false);
         try {
             await mongoose.connect(process.env.MONGODB_URI, {
                 serverSelectionTimeoutMS: 10000,

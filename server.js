@@ -689,11 +689,13 @@ const { connectDB } = require('./database');
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 [BACKEND READY] Listening on 0.0.0.0:${PORT}`);
             
-            // 3. Sync RAG in background
+            // 3. Sync RAG in background with a safety delay
             if (openai) {
-                syncKnowledgeBase()
-                    .then(() => console.log('✅ [RAG] Knowledge Base Ready.'))
-                    .catch(e => console.error('❌ [RAG ERROR]', e.message));
+                setTimeout(() => {
+                    syncKnowledgeBase()
+                        .then(() => console.log('✅ [RAG] Knowledge Base Ready.'))
+                        .catch(e => console.error('❌ [RAG ERROR]', e.message));
+                }, 2000);
             }
         });
     } catch (err) {
