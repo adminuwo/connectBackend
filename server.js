@@ -580,9 +580,9 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const messageId = message.id || "no-id";
         const lockKey = `${clientId}_${customerPhone}`;
 
-        // Stop retries & duplicates
-        if (processedMessageIds.has(messageId) || inFlightRequests.has(lockKey)) {
-            console.log(`ℹ️ [WEBHOOK] Ignoring duplicate or in-flight message.`);
+        // Stop retries & duplicates (Deduplicate by Message ID only)
+        if (processedMessageIds.has(messageId)) {
+            console.log(`ℹ️ [WEBHOOK] Ignoring duplicate messageId: ${messageId}`);
             return res.sendStatus(200);
         }
 
@@ -590,23 +590,20 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         res.sendStatus(200);
 
         processedMessageIds.add(messageId);
-        inFlightRequests.add(lockKey);
-        if (processedMessageIds.size > 1000) processedMessageIds.delete(processedMessageIds.values().next().value);
+        if (processedMessageIds.size > 2000) processedMessageIds.delete(processedMessageIds.values().next().value);
 
         try {
-            // REUSE 'client' fetched at start of route (line 539)
-            if (!client.botEnabled) {
-                console.log(`ℹ️ [WEBHOOK] Bot disabled for ${clientId}`);
-                return;
-            }
+            console.time(`⏱️ [TOTAL TIME] ${customerPhone}`);
+            // REUSE 'client' fetched at start of route (line 559)
+            if (!client.botEnabled) return;
 
             // --- PARALLEL: Audio Transcription + Chat Lookup ---
             const [transcribedText, chat] = await Promise.all([
                 (async () => {
                     const isAudio = msgType.toLowerCase() === 'audio' || msgType.toLowerCase() === 'voice';
                     if (isAudio && openai) {
+                        console.time(`🎙️ [WHISPER] ${customerPhone}`);
                         const audioUrl = message.attachment?.url || message.media?.url;
-                        console.log(`🎙️ [AUDIO] Detected audio message. URL: ${audioUrl}`);
                         if (!audioUrl) return text;
                         try {
                             const audioResponse = await axios({ url: audioUrl, method: 'GET', responseType: 'stream' });
@@ -615,10 +612,9 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                             const writer = fs.createWriteStream(tempPath);
                             audioResponse.data.pipe(writer);
                             await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
-                            console.log(`🎙️ [AUDIO] File saved locally: ${tempPath}. Transcribing...`);
                             const transcription = await openai.audio.transcriptions.create({ file: fs.createReadStream(tempPath), model: "whisper-1" });
-                            fs.unlink(tempPath, () => {}); // Background cleanup
-                            console.log(`🎙️ [AUDIO] Transcribed Text: ${transcription.text}`);
+                            fs.unlink(tempPath, () => {}); 
+                            console.timeEnd(`🎙️ [WHISPER] ${customerPhone}`);
                             return transcription.text;
                         } catch (e) { console.error('❌ [AUDIO ERROR]', e.message); return text; }
                     }
@@ -649,29 +645,44 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             if (openai) {
                 const normalizedMsg = text.toLowerCase().trim();
                 const triggerRegex = /^(hy|h|hye|hi|hii|hello|hey|hie|hye|hiii|heyy|namaste|aslam|ji|start|help)$/i;
-                if (triggerRegex.test(normalizedMsg) || normalizedMsg.length <= 1) return;
+                if (triggerRegex.test(normalizedMsg) || normalizedMsg.length <= 1) {
+                    console.timeEnd(`⏱️ [TOTAL TIME] ${customerPhone}`);
+                    return;
+                }
 
                 console.log(`🧠 [AI] Processing: ${text}`);
+                console.time(`🔍 [RAG+AI] ${customerPhone}`);
                 const response = await rag.query(clientId, text);
+                console.timeEnd(`🔍 [RAG+AI] ${customerPhone}`);
 
                 // --- SEND & FINAL SAVE ---
+                const authKey = client.apiKey || INTERAKT_KEY;
+                if (!authKey) console.warn(`⚠️ [WHATSAPP] No API Key found for client ${clientId}. Message not sent.`);
+
                 await Promise.all([
-                    axios.post('https://api.interakt.ai/v1/public/message/', {
-                        fullPhoneNumber: customerPhone,
-                        type: 'Text',
-                        data: { message: response }
-                    }, { headers: { 'Authorization': `Basic ${client.apiKey}` } }),
+                    (async () => {
+                        if (!authKey) return;
+                        try {
+                            const interaktRes = await axios.post('https://api.interakt.ai/v1/public/message/', {
+                                fullPhoneNumber: customerPhone,
+                                type: 'Text',
+                                data: { message: response }
+                            }, { headers: { 'Authorization': `Basic ${authKey}` } });
+                            console.log(`✅ [WHATSAPP] Sent to ${customerPhone}. Status: ${interaktRes.status}`);
+                        } catch (apiErr) {
+                            console.error(`❌ [WHATSAPP ERROR] Failed for ${customerPhone}:`, apiErr.response?.data || apiErr.message);
+                        }
+                    })(),
                     (async () => {
                         activeChat.messages.push({ sender: 'bot', text: response });
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
                     })()
                 ]);
+                console.timeEnd(`⏱️ [TOTAL TIME] ${customerPhone}`);
             }
         } catch (err) {
             console.error('❌ [WEBHOOK ERROR]', err.message);
-        } finally {
-            inFlightRequests.delete(lockKey);
         }
     } catch (err) {
         console.error('💥 [WEBHOOK CRITICAL ERROR]', err.message);
