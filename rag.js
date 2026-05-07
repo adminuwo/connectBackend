@@ -209,8 +209,6 @@ class SimpleRAG {
                 ],
                 temperature: 0.8
             });
-   temperature: 0.7
-            });
 
             return completion.choices[0].message.content;
         } catch (err) {
