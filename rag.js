@@ -206,7 +206,7 @@ class SimpleRAG {
                 });
 
                 const response = await client.models.generateContentStream({
-                    model: 'gemini-2.5-flash', 
+                    model: 'gemini-1.5-flash', 
                     contents: userQuery,
                     config: {
                         responseModalities: [Modality.TEXT, Modality.IMAGE],
