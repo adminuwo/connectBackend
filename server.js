@@ -171,7 +171,8 @@ app.post('/api/auth/login', async (req, res) => {
             success: true,
             clientId: '1778045186668',
             name: 'Master Admin',
-            role: 'admin'
+            role: 'admin',
+            isAdmin: true
         });
     }
 
@@ -203,7 +204,8 @@ app.post('/api/auth/login', async (req, res) => {
             success: true,
             clientId: client._id || client.id,
             name: client.name,
-            role: client.role || 'client'
+            role: client.role || 'client',
+            isAdmin: client.role === 'admin'
         });
     } catch (err) {
         console.error('💥 [LOGIN ERROR]', err.message);
