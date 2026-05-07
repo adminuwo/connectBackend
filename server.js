@@ -638,7 +638,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             activeChat.messages.push({ 
                 sender: 'customer', 
-                text, 
+                text: text || "Audio Message", 
                 msgType: isAudio ? 'audio' : 'text',
                 mediaUrl: isAudio ? audioUrl : ''
             });

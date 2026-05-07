@@ -194,12 +194,7 @@ class SimpleRAG {
         
         try {
             const lowerQuery = userQuery.toLowerCase();
-            const isImageRequest = lowerQuery.includes('generate image') || 
-                                  lowerQuery.includes('create image') || 
-                                  lowerQuery.includes('photo of') || 
-                                  lowerQuery.includes('image of') ||
-                                  lowerQuery.includes('image banao') ||
-                                  lowerQuery.includes('photo banao');
+            const isImageRequest = /\b(generate|create|make|banao|bana|show)\b.*\b(image|photo|picture|pic|drawing|image)\b/i.test(lowerQuery);
 
             if (isImageRequest) {
                 console.log(`🎨 [GEMINI] Generating image for: ${userQuery}`);
@@ -211,7 +206,7 @@ class SimpleRAG {
                 });
 
                 const response = await client.models.generateContentStream({
-                    model: 'gemini-2.5-flash-image',
+                    model: 'gemini-2.5-flash', 
                     contents: userQuery,
                     config: {
                         responseModalities: [Modality.TEXT, Modality.IMAGE],
