@@ -600,11 +600,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             if (openai && text !== "Media/Unsupported message") {
                 const normalizedMsg = text.toLowerCase().trim();
-                const triggerWords = ['hy', 'h', 'hye', 'hi', 'hii', 'hello', 'hey', 'hie', 'hye', 'hiii', 'heyy', 'namaste', 'aslam', 'ji', 'start'];
+                const triggerRegex = /^(hy|h|hye|hi|hii|hello|hey|hie|hye|hiii|heyy|namaste|aslam|ji|start|help)$/i;
                 
                 // 1. Strict Workflow Trigger Check (Let Interakt handle these)
-                if (triggerWords.includes(normalizedMsg) || normalizedMsg.length <= 1) {
-                    console.log(`[WORKFLOW PRIORITY] Ignoring: ${normalizedMsg}`);
+                if (triggerRegex.test(normalizedMsg) || normalizedMsg.length <= 1) {
+                    console.log(`[WORKFLOW PRIORITY] Ignoring trigger: ${normalizedMsg}`);
                     return; 
                 } 
                 
