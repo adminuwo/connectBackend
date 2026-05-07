@@ -580,13 +580,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const messageId = message.id || "no-id";
         const lockKey = `${clientId}_${customerPhone}`;
 
-        // Stop retries & duplicates (Deduplicate by Message ID only)
-        if (processedMessageIds.has(messageId)) {
-            console.log(`ℹ️ [WEBHOOK] Ignoring duplicate messageId: ${messageId}`);
-            return res.sendStatus(200);
-        }
-
-        // Send 200 OK immediately
+        // Stop retries & duplicates
+        if (processedMessageIds.has(messageId)) return res.sendStatus(200);
         res.sendStatus(200);
 
         processedMessageIds.add(messageId);
@@ -594,60 +589,42 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
         try {
             console.time(`⏱️ [TOTAL TIME] ${customerPhone}`);
-            // REUSE 'client' fetched at start of route (line 559)
             if (!client.botEnabled) return;
 
             const authKey = client.apiKey || INTERAKT_KEY;
+            
+            // Robust Audio Detection (Used for both Whisper and DB Save)
+            const lowType = msgType.toLowerCase();
+            const isAudio = lowType.includes('audio') || lowType.includes('voice') || !!message.audio;
+            const audioUrl = message.attachment?.url || message.media?.url || message.media_url || (message.audio && message.audio.url) || '';
 
             // --- PARALLEL: Audio Transcription + Chat Lookup ---
             const [transcribedText, chat] = await Promise.all([
                 (async () => {
-                    const isAudio = msgType.toLowerCase() === 'audio' || msgType.toLowerCase() === 'voice';
                     if (isAudio && openai) {
-                        console.log(`🎙️ [WHISPER] Processing audio from ${customerPhone}...`);
-                        console.time(`🎙️ [WHISPER] ${customerPhone}`);
-                        const audioUrl = message.attachment?.url || message.media?.url || message.media_url;
-                        if (!audioUrl) {
-                            console.log('⚠️ [WHISPER] No audio URL found');
-                            return text;
-                        }
+                        if (!audioUrl) return text;
                         try {
                             const audioResponse = await axios({ 
                                 url: audioUrl, 
                                 method: 'GET', 
-                                responseType: 'stream',
+                                responseType: 'arraybuffer',
                                 headers: authKey ? { 'Authorization': `Basic ${authKey}` } : {}
                             });
-                            
                             const tempDir = '/tmp/temp_audio';
                             if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
                             const tempPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
-                            
-                            const writer = fs.createWriteStream(tempPath);
-                            audioResponse.data.pipe(writer);
-                            await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
-                            
-                            console.log(`📥 [WHISPER] Audio downloaded to ${tempPath}`);
-                            const transcription = await openai.audio.transcriptions.create({ 
-                                file: fs.createReadStream(tempPath), 
-                                model: "whisper-1" 
-                            });
-                            
+                            fs.writeFileSync(tempPath, audioResponse.data);
+                            const transcription = await openai.audio.transcriptions.create({ file: fs.createReadStream(tempPath), model: "whisper-1" });
                             fs.unlink(tempPath, () => {}); 
-                            console.log(`📝 [WHISPER] Transcription: ${transcription.text}`);
-                            console.timeEnd(`🎙️ [WHISPER] ${customerPhone}`);
                             return transcription.text;
-                        } catch (e) { 
-                            console.error('❌ [AUDIO ERROR]', e.message, e.response?.data); 
-                            return text; 
-                        }
+                        } catch (e) { return text; }
                     }
                     return text;
                 })(),
                 Chat.findOne({ clientId, customerPhone })
             ]);
 
-            text = transcribedText;
+            text = transcribedText || text || "Audio Message";
             if (!text || text === "Media/Unsupported message") return;
 
             // Initialize or update chat object
@@ -658,9 +635,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 const lastMsg = activeChat.messages[activeChat.messages.length - 1];
                 if (lastMsg.sender === 'bot' && (text.startsWith(lastMsg.text.substring(0, 20)) || lastMsg.text.startsWith(text.substring(0, 20)))) return;
             }
-
-            const isAudio = msgType.toLowerCase() === 'audio' || msgType.toLowerCase() === 'voice';
-            const audioUrl = message.attachment?.url || message.media?.url || message.media_url || '';
 
             activeChat.messages.push({ 
                 sender: 'customer', 
