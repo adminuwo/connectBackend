@@ -239,7 +239,7 @@ const createConstructorProxy = (mockInstance) => {
     return MockConstructor;
 };
 
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = process.env.NODE_ENV === 'production' || !!process.env.K_SERVICE;
 let dbMode = isProduction ? 'atlas' : 'json'; 
 
 if (isProduction || process.env.DB_MODE === 'atlas') {
