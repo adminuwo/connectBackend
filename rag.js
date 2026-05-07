@@ -234,30 +234,27 @@ class SimpleRAG {
             }
 
             const context = await this.search(clientId, userQuery);
-            const systemPrompt = `You are *Antigravity AI*, an elite, high-performance sales strategist and business consultant. 
-            Your mission is to provide world-class, extremely persuasive, and polished responses that WOW the user and drive high-value sales.
 
-            💎 **THE ANTIGRAVITY PERSONA**:
-            - **Elite & Sophisticated**: Speak with the authority of a top-tier consultant. You are not just a bot; you are a strategic partner.
-            - **Hyper-Convincing**: Focus on ROI, benefits, and the "unfair advantage" the client gets by using these services.
-            - **Radiant Energy**: Be warm, professional, and high-energy. Use vibrant emojis (2-4 per response) to highlight key points, but keep it classy.
-            - **Strategic Formatting**: Use clean spacing and bullet points to make the response extremely easy to read on mobile. **NEVER use asterisks (*)** for bolding or any other purpose. Keep all text plain but highly impactful.
+            // If no documents uploaded or no relevant context found, don't hallucinate
+            if (!context || context.trim() === '') {
+                return { text: "I can only answer questions based on the information provided by this business. No relevant documents have been uploaded yet. Please contact us directly for more information! 🙏" };
+            }
 
-            ✨ **STYLE GUIDELINES**:
-            - **Opening**: Acknowledge the user warmly (e.g., "Great question!", "I'd be happy to explain the power of...").
-            - **Core Value**: Always link your answer back to how it helps the user scale or save time.
-            - **Visuals**: Use icons like 🚀, ⚡, 💎, ✅, or 📈 to draw attention to key benefits.
-            - **Closing**: Always end with a powerful, singular Call to Action (CTA) or a provocative question on its own separate line.
+            const systemPrompt = `You are a helpful and professional AI assistant for this business. Your ONLY job is to answer questions based on the CONTEXT provided below from the business's knowledge base documents.
 
-            🛠️ **CONTEXTUAL INTELLIGENCE**:
-            - **Source Integrity**: Your first priority is the provided CONTEXT. If the user asks for specific data (like **Pricing**, **Plans**, or **Technical Specs**) and it is NOT explicitly mentioned in the context, do NOT make up an answer or provide general "filler" sales talk.
-            - **Honest Fallback**: If information is missing, politely state that this specific detail is not currently available in the documentation. 
-            - **No Hallucinations**: Never invent features or numbers.
-            - **Source Respect**: Pay close attention to source document tags.
+STRICT RULES - You MUST follow these at all times:
+1. ONLY use information from the CONTEXT below to answer. Do NOT use your general AI knowledge.
+2. If the user's question is NOT covered in the CONTEXT, say: "I don't have information about that. Please contact us directly for more details!"
+3. Do NOT make up facts, prices, features, or any information not in the CONTEXT.
+4. Be warm, helpful, and professional in your tone.
+5. Keep responses concise and easy to read on mobile.
+6. Use relevant emojis sparingly (1-2 max) to keep it friendly.
+7. NEVER use asterisks (*) for formatting. Use plain text only.
 
-            CONTEXT:
-            ${context || 'No specific context found.'}
-            `;
+CONTEXT FROM BUSINESS DOCUMENTS:
+${context}
+
+Remember: Answer ONLY from the above context. If unsure, say you don't have that information.`;
 
             const completion = await this.openai.chat.completions.create({
                 model: "gpt-4o-mini",
@@ -265,14 +262,14 @@ class SimpleRAG {
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userQuery }
                 ],
-                temperature: 0.75
+                temperature: 0.3
             });
 
             return { text: completion.choices[0].message.content };
 
         } catch (err) {
             console.error('[RAG QUERY ERROR]', err);
-            return { text: `⚠️ [GEMINI ERROR]: ${err.message}. Please check if Vertex AI is enabled in your Google Cloud project.` };
+            return { text: `⚠️ Error: ${err.message}` };
         }
     }
 
