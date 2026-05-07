@@ -239,27 +239,32 @@ const createConstructorProxy = (mockInstance) => {
     return MockConstructor;
 };
 
-let dbMode = 'json'; // Default to json until connected
+const isProduction = process.env.NODE_ENV === 'production';
+let dbMode = isProduction ? 'atlas' : 'json'; 
 
-console.log('🔄 [DB] Attempting to connect to MongoDB Atlas...');
-mongoose.set('bufferCommands', false);
-mongoose.connect(process.env.MONGODB_URI, {
-    serverSelectionTimeoutMS: 5000,
-    connectTimeoutMS: 5000,
-}).then(() => {
-    console.log('✅ [DB] Connected to MongoDB Atlas');
-    dbMode = 'atlas';
-}).catch(err => {
-    console.error('❌ [DB] MongoDB Connection Error:', err.message);
-    if (process.env.NODE_ENV === 'production') {
-        console.error('🚨 [CRITICAL] Database connection failed in Production. Fallback to JSON is disabled to prevent data loss.');
-        // In production, we don't want to fallback to ephemeral storage
-        dbMode = 'atlas'; // Keep it as atlas so it continues to try/fail instead of writing to local files
-    } else {
-        console.log('🏠 [DB] Falling back to Local JSON mode for development.');
-        dbMode = 'json';
-    }
-});
+if (isProduction || process.env.DB_MODE === 'atlas') {
+    console.log('🔄 [DB] Production Mode: Connecting to MongoDB Atlas...');
+    mongoose.set('bufferCommands', false);
+    mongoose.connect(process.env.MONGODB_URI, {
+        serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 10000,
+    }).then(() => {
+        console.log('✅ [DB] Connected to MongoDB Atlas');
+        dbMode = 'atlas';
+    }).catch(err => {
+        console.error('❌ [DB] MongoDB Connection Error:', err.message);
+        if (isProduction) {
+            console.error('🚨 [CRITICAL] Could not connect to MongoDB in Production! Please check MONGODB_URI and IP Whitelist.');
+            dbMode = 'atlas'; // Keep it as atlas to prevent accidental JSON writes
+        } else {
+            console.log('🏠 [DB] Dev Mode: Falling back to JSON since MongoDB failed.');
+            dbMode = 'json';
+        }
+    });
+} else {
+    console.log('🏠 [DB] Local Mode: Using JSON storage.');
+    dbMode = 'json';
+}
 
 const ClientModel = createConstructorProxy(JsonClient);
 const TicketModel = createConstructorProxy(JsonTicket);
