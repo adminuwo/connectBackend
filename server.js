@@ -466,7 +466,10 @@ app.post('/api/admin/clients/create', async (req, res) => {
 
 app.get('/api/admin/clients', async (req, res) => {
     try {
-        const clients = await Client.find({ role: { $ne: 'admin' } });
+        let clients = await Client.find({});
+        // Filter out admins manually for compatibility with JSON mock
+        clients = clients.filter(c => c.role !== 'admin' && !c.isAdmin);
+        
         res.json(clients.map(c => ({
             ...c.toObject ? c.toObject() : c,
             id: c._id || c.id,
