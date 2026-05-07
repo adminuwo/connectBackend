@@ -56,6 +56,13 @@ async function uploadToBucket(clientId, fileName, fileContent) {
             await file.save(fileContent);
         }
         
+        // Make the file public so Interakt/WhatsApp can access it
+        try {
+            await file.makePublic();
+        } catch (pubErr) {
+            console.warn(`⚠️ [GCS] Could not make ${fileName} public. Ensure bucket permissions allow it.`);
+        }
+        
         console.log(`✅ [GCS] File uploaded to: ${destFileName}`);
         return `https://storage.googleapis.com/${bucketName}/${destFileName}`;
     } catch (err) {
