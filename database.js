@@ -219,15 +219,24 @@ const JsonTicket = new MockModel('tickets.json', 'Ticket');
 const JsonChat = new MockModel('chats.json', 'Chat');
 const JsonOTP = new MockModel('otps.json', 'OTP');
 
-// Helper to create a proxy that supports 'new' while keeping instance methods
-const createProxy = (instance) => {
-    return new Proxy(instance, {
-        get: (target, prop) => {
-            if (prop === 'new') return (data) => target.createInstance(data);
-            const value = target[prop];
-            return typeof value === 'function' ? value.bind(target) : value;
+// Helper to make JSON models behave like constructors (supporting 'new Model()')
+const createConstructorProxy = (mockInstance) => {
+    // This is the function that will be called when "new Model()" is used
+    function MockConstructor(data) {
+        return mockInstance.createInstance(data);
+    }
+    
+    // Copy all methods from mockInstance to the constructor function (like find, findOne, etc.)
+    Object.getOwnPropertyNames(Object.getPrototypeOf(mockInstance)).forEach(prop => {
+        if (prop !== 'constructor' && typeof mockInstance[prop] === 'function') {
+            MockConstructor[prop] = mockInstance[prop].bind(mockInstance);
         }
     });
+    
+    // Support the .new() pattern just in case
+    MockConstructor.new = (data) => mockInstance.createInstance(data);
+    
+    return MockConstructor;
 };
 
 let dbMode = 'json'; // Default to json until connected
@@ -252,10 +261,15 @@ mongoose.connect(process.env.MONGODB_URI, {
     }
 });
 
+const ClientModel = createConstructorProxy(JsonClient);
+const TicketModel = createConstructorProxy(JsonTicket);
+const ChatModel = createConstructorProxy(JsonChat);
+const OTPModel = createConstructorProxy(JsonOTP);
+
 module.exports = { 
-    get Client() { return dbMode === 'atlas' ? MongooseClient : JsonClient; },
-    get Ticket() { return dbMode === 'atlas' ? MongooseTicket : JsonTicket; },
-    get Chat() { return dbMode === 'atlas' ? MongooseChat : JsonChat; },
-    get OTP() { return dbMode === 'atlas' ? MongooseOTP : JsonOTP; },
+    get Client() { return dbMode === 'atlas' ? MongooseClient : ClientModel; },
+    get Ticket() { return dbMode === 'atlas' ? MongooseTicket : TicketModel; },
+    get Chat() { return dbMode === 'atlas' ? MongooseChat : ChatModel; },
+    get OTP() { return dbMode === 'atlas' ? MongooseOTP : OTPModel; },
     isLocal: () => dbMode === 'json'
 };
