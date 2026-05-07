@@ -5,6 +5,8 @@ const pdf = require('pdf-parse');
 const WordExtractor = require("word-extractor");
 const extractor = new WordExtractor();
 const XLSX = require('xlsx');
+const { GoogleGenAI, Modality } = require('@google/genai');
+const gcs = require('./gcs'); // Import GCS for image hosting
 
 class SimpleRAG {
     constructor(openai) {
@@ -188,9 +190,56 @@ class SimpleRAG {
     }
 
     async query(clientId, userQuery) {
-        if (!this.openai) return "I'm sorry, my AI features are currently offline.";
+        if (!this.openai) return { text: "I'm sorry, my AI features are currently offline." };
         
         try {
+            const lowerQuery = userQuery.toLowerCase();
+            const isImageRequest = lowerQuery.includes('generate image') || 
+                                  lowerQuery.includes('create image') || 
+                                  lowerQuery.includes('photo of') || 
+                                  lowerQuery.includes('image of') ||
+                                  lowerQuery.includes('image banao') ||
+                                  lowerQuery.includes('photo banao');
+
+            if (isImageRequest) {
+                console.log(`🎨 [GEMINI] Generating image for: ${userQuery}`);
+                
+                const client = new GoogleGenAI({
+                    vertexai: true,
+                    project: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID,
+                    location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+                });
+
+                const response = await client.models.generateContentStream({
+                    model: 'gemini-2.5-flash-image',
+                    contents: userQuery,
+                    config: {
+                        responseModalities: [Modality.TEXT, Modality.IMAGE],
+                    },
+                });
+
+                let imageBuffer = null;
+                for await (const chunk of response) {
+                    if (chunk.data) {
+                        imageBuffer = chunk.data;
+                        break; // Take the first image found
+                    }
+                }
+
+                if (imageBuffer) {
+                    const fileName = `generated_${Date.now()}.png`;
+                    const publicUrl = await gcs.uploadToBucket(`generated_images/${clientId}`, fileName, imageBuffer);
+                    console.log(`✅ [GEMINI] Image generated and uploaded: ${publicUrl}`);
+                    
+                    return { 
+                        text: "Here is the image I generated for you using Gemini! 🎨✨", 
+                        imageUrl: publicUrl 
+                    };
+                } else {
+                    return { text: "I tried to generate an image but couldn't get the visual data. Please try again with a clearer prompt!" };
+                }
+            }
+
             const context = await this.search(clientId, userQuery);
             const systemPrompt = `You are *Antigravity AI*, an elite, high-performance sales strategist and business consultant. 
             Your mission is to provide world-class, extremely persuasive, and polished responses that WOW the user and drive high-value sales.
@@ -209,9 +258,9 @@ class SimpleRAG {
 
             🛠️ **CONTEXTUAL INTELLIGENCE**:
             - **Source Integrity**: Your first priority is the provided CONTEXT. If the user asks for specific data (like **Pricing**, **Plans**, or **Technical Specs**) and it is NOT explicitly mentioned in the context, do NOT make up an answer or provide general "filler" sales talk.
-            - **Honest Fallback**: If information is missing, politely state that this specific detail is not currently available in the documentation. For example: "I don't have the exact pricing details in my current records, but I can certainly connect you with our team for a personalized quote!" 
-            - **No Hallucinations**: Never invent features or numbers. It is better to be honest and professional than to be vague or incorrect.
-            - **Source Respect**: Pay close attention to the [Source Document: filename] tags. Prioritize information from the most relevant file.
+            - **Honest Fallback**: If information is missing, politely state that this specific detail is not currently available in the documentation. 
+            - **No Hallucinations**: Never invent features or numbers.
+            - **Source Respect**: Pay close attention to source document tags.
 
             CONTEXT:
             ${context || 'No specific context found.'}
@@ -226,10 +275,10 @@ class SimpleRAG {
                 temperature: 0.75
             });
 
-            return completion.choices[0].message.content;
+            return { text: completion.choices[0].message.content };
         } catch (err) {
             console.error('[RAG QUERY ERROR]', err.message);
-            return "I'm experiencing a brief technical glitch. Please give me a moment and try again! 🚀";
+            return { text: "I'm experiencing a brief technical glitch. Please give me a moment and try again! 🚀" };
         }
     }
 
