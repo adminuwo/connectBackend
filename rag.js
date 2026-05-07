@@ -171,6 +171,16 @@ class SimpleRAG {
     }
 
     async search(clientId, query, topK = 5) {
+        // Auto-reload from GCS if not in memory (handles Cloud Run restarts)
+        if (!this.clientChunks[clientId] || this.clientChunks[clientId].length === 0) {
+            console.log(`[RAG] ⚠️ No chunks in memory for ${clientId}. Trying GCS sync...`);
+            try {
+                await this.syncClientFromGCS(clientId);
+            } catch (e) {
+                console.error(`[RAG] GCS sync failed: ${e.message}`);
+            }
+        }
+
         const chunks = this.clientChunks[clientId];
         if (!chunks || chunks.length === 0) return '';
 
@@ -182,10 +192,39 @@ class SimpleRAG {
             }));
 
             results.sort((a, b) => b.similarity - a.similarity);
-            return results.slice(0, topK).map(r => r.text).join('\n\n---\n\n');
+            // Return top results with similarity > 0.3 threshold
+            const relevant = results.filter(r => r.similarity > 0.3).slice(0, topK);
+            if (relevant.length === 0) return results.slice(0, 3).map(r => r.text).join('\n\n---\n\n'); // fallback: return top 3 anyway
+            return relevant.map(r => r.text).join('\n\n---\n\n');
         } catch (error) {
             console.error(`[RAG] Search error for client ${clientId}:`, error.message);
             return '';
+        }
+    }
+
+    async syncClientFromGCS(clientId) {
+        try {
+            const files = await gcs.listClientFiles(clientId);
+            if (!files || files.length === 0) {
+                console.log(`[RAG] No files found in GCS for client ${clientId}`);
+                return;
+            }
+
+            const clientPath = path.join(this.baseKbPath, clientId);
+            if (!fs.existsSync(clientPath)) fs.mkdirSync(clientPath, { recursive: true });
+
+            for (const fileName of files) {
+                const localPath = path.join(clientPath, fileName);
+                if (!fs.existsSync(localPath)) {
+                    console.log(`[RAG] 📥 Downloading ${fileName} from GCS...`);
+                    await gcs.downloadFromBucket(clientId, fileName, localPath);
+                }
+            }
+
+            await this.loadClientKnowledge(clientId, clientId);
+            console.log(`[RAG] ✅ GCS sync complete for ${clientId}. ${this.clientChunks[clientId]?.length || 0} chunks loaded.`);
+        } catch (err) {
+            console.error(`[RAG] syncClientFromGCS error: ${err.message}`);
         }
     }
 
@@ -240,21 +279,33 @@ class SimpleRAG {
                 return { text: "I can only answer questions based on the information provided by this business. No relevant documents have been uploaded yet. Please contact us directly for more information! 🙏" };
             }
 
-            const systemPrompt = `You are a helpful and professional AI assistant for this business. Your ONLY job is to answer questions based on the CONTEXT provided below from the business's knowledge base documents.
+            const systemPrompt = `You are an elite AI sales assistant for this business. Your job is to answer customer questions using ONLY the business information provided below, and do it in a way that is warm, convincing, and drives sales.
 
-STRICT RULES - You MUST follow these at all times:
-1. ONLY use information from the CONTEXT below to answer. Do NOT use your general AI knowledge.
-2. If the user's question is NOT covered in the CONTEXT, say: "I don't have information about that. Please contact us directly for more details!"
-3. Do NOT make up facts, prices, features, or any information not in the CONTEXT.
-4. Be warm, helpful, and professional in your tone.
-5. Keep responses concise and easy to read on mobile.
-6. Use relevant emojis sparingly (1-2 max) to keep it friendly.
-7. NEVER use asterisks (*) for formatting. Use plain text only.
+━━━━━━━━━━━━━━━━━━━━━━
+STRICT CONTENT RULES:
+━━━━━━━━━━━━━━━━━━━━━━
+1. ONLY use facts, prices, features, and details from the BUSINESS CONTEXT below.
+2. Do NOT use your general AI knowledge. No hallucinating.
+3. If the answer is NOT in the context, reply: "I don't have that specific info right now, but our team can help you! Please reach out to us directly. 🙏"
+4. Never make up prices, plans, or features.
 
-CONTEXT FROM BUSINESS DOCUMENTS:
+━━━━━━━━━━━━━━━━━━━━━━
+RESPONSE FORMAT RULES:
+━━━━━━━━━━━━━━━━━━━━━━
+- Start with a warm, engaging opening line.
+- Use clear bullet points for lists (use - or •, NOT asterisks *).
+- Use 2-3 relevant emojis per message to keep it friendly and visual.
+- Keep each point short — mobile-friendly.
+- End EVERY reply with ONE strong call-to-action on its own line.
+- Tone: Warm, confident, professional — like a trusted advisor, not a robot.
+- Make the customer feel excited and confident about the product/service.
+
+━━━━━━━━━━━━━━━━━━━━━━
+BUSINESS CONTEXT:
+━━━━━━━━━━━━━━━━━━━━━━
 ${context}
 
-Remember: Answer ONLY from the above context. If unsure, say you don't have that information.`;
+Remember: Be persuasive but honest. Only use information from the context above.`;
 
             const completion = await this.openai.chat.completions.create({
                 model: "gpt-4o-mini",
@@ -262,7 +313,7 @@ Remember: Answer ONLY from the above context. If unsure, say you don't have that
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userQuery }
                 ],
-                temperature: 0.3
+                temperature: 0.5
             });
 
             return { text: completion.choices[0].message.content };
