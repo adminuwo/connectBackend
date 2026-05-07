@@ -628,6 +628,31 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 });
 
 // START SERVER
+// TEMPORARY: Admin Data Migration Route
+app.get('/api/admin/migrate-data', async (req, res) => {
+    try {
+        if (isLocal()) {
+            return res.json({ error: "Migration only works when MongoDB is connected." });
+        }
+
+        const clientsPath = path.join(__dirname, 'clients.json');
+        let count = 0;
+        if (fs.existsSync(clientsPath)) {
+            const clients = JSON.parse(fs.readFileSync(clientsPath, 'utf8'));
+            for (let c of clients) {
+                const existing = await Client.findOne({ email: c.email });
+                if (!existing) {
+                    await Client.create(c);
+                    count++;
+                }
+            }
+        }
+        res.json({ success: true, message: `Migrated ${count} clients to MongoDB Atlas.` });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 [BACKEND READY] Listening on 0.0.0.0:${PORT}`);
 
