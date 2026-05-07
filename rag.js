@@ -224,14 +224,12 @@ class SimpleRAG {
                 if (imageBuffer) {
                     const fileName = `generated_${Date.now()}.png`;
                     const publicUrl = await gcs.uploadToBucket(`generated_images/${clientId}`, fileName, imageBuffer);
-                    console.log(`✅ [GEMINI] Image generated and uploaded: ${publicUrl}`);
-                    
                     return { 
                         text: "Here is the image I generated for you using Gemini! 🎨✨", 
                         imageUrl: publicUrl 
                     };
                 } else {
-                    return { text: "I tried to generate an image but couldn't get the visual data. Please try again with a clearer prompt!" };
+                    return { text: "I tried to generate an image but couldn't get the visual data. Please try again!" };
                 }
             }
 
@@ -271,9 +269,10 @@ class SimpleRAG {
             });
 
             return { text: completion.choices[0].message.content };
+
         } catch (err) {
-            console.error('[RAG QUERY ERROR]', err.message);
-            return { text: "I'm experiencing a brief technical glitch. Please give me a moment and try again! 🚀" };
+            console.error('[RAG QUERY ERROR]', err);
+            return { text: `⚠️ [GEMINI ERROR]: ${err.message}. Please check if Vertex AI is enabled in your Google Cloud project.` };
         }
     }
 
