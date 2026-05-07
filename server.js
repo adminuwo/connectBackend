@@ -677,11 +677,27 @@ app.get('/api/admin/migrate-data', async (req, res) => {
     }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 [BACKEND READY] Listening on 0.0.0.0:${PORT}`);
+// --- STARTUP ---
+const { connectDB } = require('./database');
 
-    // Background Init
-    setTimeout(() => {
-        syncKnowledgeBase().catch(e => console.error('Background Error:', e));
-    }, 2000);
-});
+(async () => {
+    try {
+        // 1. Connect to DB first
+        await connectDB();
+        
+        // 2. Start Server
+        app.listen(PORT, '0.0.0.0', () => {
+            console.log(`🚀 [BACKEND READY] Listening on 0.0.0.0:${PORT}`);
+            
+            // 3. Sync RAG in background
+            if (openai) {
+                syncKnowledgeBase()
+                    .then(() => console.log('✅ [RAG] Knowledge Base Ready.'))
+                    .catch(e => console.error('❌ [RAG ERROR]', e.message));
+            }
+        });
+    } catch (err) {
+        console.error('💥 [CRITICAL STARTUP ERROR]', err.message);
+        process.exit(1);
+    }
+})();

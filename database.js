@@ -242,29 +242,32 @@ const createConstructorProxy = (mockInstance) => {
 const isProduction = process.env.NODE_ENV === 'production' || !!process.env.K_SERVICE;
 let dbMode = isProduction ? 'atlas' : 'json'; 
 
-if (isProduction || process.env.DB_MODE === 'atlas') {
-    console.log('🔄 [DB] Production Mode: Connecting to MongoDB Atlas...');
-    mongoose.set('bufferCommands', false);
-    mongoose.connect(process.env.MONGODB_URI, {
-        serverSelectionTimeoutMS: 10000,
-        connectTimeoutMS: 10000,
-    }).then(() => {
-        console.log('✅ [DB] Connected to MongoDB Atlas');
-        dbMode = 'atlas';
-    }).catch(err => {
-        console.error('❌ [DB] MongoDB Connection Error:', err.message);
-        if (isProduction) {
-            console.error('🚨 [CRITICAL] Could not connect to MongoDB in Production! Please check MONGODB_URI and IP Whitelist.');
-            dbMode = 'atlas'; // Keep it as atlas to prevent accidental JSON writes
-        } else {
-            console.log('🏠 [DB] Dev Mode: Falling back to JSON since MongoDB failed.');
-            dbMode = 'json';
+const connectDB = async () => {
+    if (isProduction || process.env.DB_MODE === 'atlas') {
+        console.log('🔄 [DB] Production Mode: Connecting to MongoDB Atlas...');
+        mongoose.set('bufferCommands', false);
+        try {
+            await mongoose.connect(process.env.MONGODB_URI, {
+                serverSelectionTimeoutMS: 10000,
+                connectTimeoutMS: 10000,
+            });
+            console.log('✅ [DB] Connected to MongoDB Atlas');
+            dbMode = 'atlas';
+        } catch (err) {
+            console.error('❌ [DB] MongoDB Connection Error:', err.message);
+            if (isProduction) {
+                console.error('🚨 [CRITICAL] Could not connect to MongoDB in Production!');
+                dbMode = 'atlas';
+            } else {
+                console.log('🏠 [DB] Dev Mode: Falling back to JSON.');
+                dbMode = 'json';
+            }
         }
-    });
-} else {
-    console.log('🏠 [DB] Local Mode: Using JSON storage.');
-    dbMode = 'json';
-}
+    } else {
+        console.log('🏠 [DB] Local Mode: Using JSON storage.');
+        dbMode = 'json';
+    }
+};
 
 const ClientModel = createConstructorProxy(JsonClient);
 const TicketModel = createConstructorProxy(JsonTicket);
@@ -272,6 +275,7 @@ const ChatModel = createConstructorProxy(JsonChat);
 const OTPModel = createConstructorProxy(JsonOTP);
 
 module.exports = { 
+    connectDB,
     get Client() { return dbMode === 'atlas' ? MongooseClient : ClientModel; },
     get Ticket() { return dbMode === 'atlas' ? MongooseTicket : TicketModel; },
     get Chat() { return dbMode === 'atlas' ? MongooseChat : ChatModel; },
