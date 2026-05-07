@@ -233,17 +233,23 @@ const createProxy = (instance) => {
 let dbMode = 'json'; // Default to json until connected
 
 console.log('🔄 [DB] Attempting to connect to MongoDB Atlas...');
-mongoose.set('bufferCommands', false); // CRITICAL: Stop buffering to prevent hangs
+mongoose.set('bufferCommands', false);
 mongoose.connect(process.env.MONGODB_URI, {
-    serverSelectionTimeoutMS: 5000, // Fail fast (5s)
+    serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 5000,
 }).then(() => {
     console.log('✅ [DB] Connected to MongoDB Atlas');
     dbMode = 'atlas';
 }).catch(err => {
     console.error('❌ [DB] MongoDB Connection Error:', err.message);
-    console.log('🏠 [DB] Falling back to Local JSON mode safely.');
-    dbMode = 'json';
+    if (process.env.NODE_ENV === 'production') {
+        console.error('🚨 [CRITICAL] Database connection failed in Production. Fallback to JSON is disabled to prevent data loss.');
+        // In production, we don't want to fallback to ephemeral storage
+        dbMode = 'atlas'; // Keep it as atlas so it continues to try/fail instead of writing to local files
+    } else {
+        console.log('🏠 [DB] Falling back to Local JSON mode for development.');
+        dbMode = 'json';
+    }
 });
 
 module.exports = { 
