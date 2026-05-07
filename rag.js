@@ -208,8 +208,10 @@ class SimpleRAG {
             - **Closing**: Always end with a powerful, singular Call to Action (CTA) or a provocative question on its own separate line.
 
             🛠️ **CONTEXTUAL INTELLIGENCE**:
+            - **Source Integrity**: Your first priority is the provided CONTEXT. If the user asks for specific data (like **Pricing**, **Plans**, or **Technical Specs**) and it is NOT explicitly mentioned in the context, do NOT make up an answer or provide general "filler" sales talk.
+            - **Honest Fallback**: If information is missing, politely state that this specific detail is not currently available in the documentation. For example: "I don't have the exact pricing details in my current records, but I can certainly connect you with our team for a personalized quote!" 
+            - **No Hallucinations**: Never invent features or numbers. It is better to be honest and professional than to be vague or incorrect.
             - **Source Respect**: Pay close attention to the [Source Document: filename] tags. Prioritize information from the most relevant file.
-            - **Expert Fallback**: If information is missing from the context, use your deep AI business knowledge to craft a logical, professional, and sales-oriented answer. Never say "I don't know" in a dry way; instead, offer a consultative bridge.
 
             CONTEXT:
             ${context || 'No specific context found.'}
