@@ -597,26 +597,50 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             // REUSE 'client' fetched at start of route (line 559)
             if (!client.botEnabled) return;
 
+            const authKey = client.apiKey || INTERAKT_KEY;
+
             // --- PARALLEL: Audio Transcription + Chat Lookup ---
             const [transcribedText, chat] = await Promise.all([
                 (async () => {
                     const isAudio = msgType.toLowerCase() === 'audio' || msgType.toLowerCase() === 'voice';
                     if (isAudio && openai) {
+                        console.log(`🎙️ [WHISPER] Processing audio from ${customerPhone}...`);
                         console.time(`🎙️ [WHISPER] ${customerPhone}`);
                         const audioUrl = message.attachment?.url || message.media?.url || message.media_url;
-                        if (!audioUrl) return text;
+                        if (!audioUrl) {
+                            console.log('⚠️ [WHISPER] No audio URL found');
+                            return text;
+                        }
                         try {
-                            const audioResponse = await axios({ url: audioUrl, method: 'GET', responseType: 'stream' });
-                            const tempPath = path.join(__dirname, 'temp_audio', `audio_${Date.now()}.ogg`);
-                            if (!fs.existsSync(path.dirname(tempPath))) fs.mkdirSync(path.dirname(tempPath), { recursive: true });
+                            const audioResponse = await axios({ 
+                                url: audioUrl, 
+                                method: 'GET', 
+                                responseType: 'stream',
+                                headers: authKey ? { 'Authorization': `Basic ${authKey}` } : {}
+                            });
+                            
+                            const tempDir = '/tmp/temp_audio';
+                            if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+                            const tempPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
+                            
                             const writer = fs.createWriteStream(tempPath);
                             audioResponse.data.pipe(writer);
                             await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
-                            const transcription = await openai.audio.transcriptions.create({ file: fs.createReadStream(tempPath), model: "whisper-1" });
+                            
+                            console.log(`📥 [WHISPER] Audio downloaded to ${tempPath}`);
+                            const transcription = await openai.audio.transcriptions.create({ 
+                                file: fs.createReadStream(tempPath), 
+                                model: "whisper-1" 
+                            });
+                            
                             fs.unlink(tempPath, () => {}); 
+                            console.log(`📝 [WHISPER] Transcription: ${transcription.text}`);
                             console.timeEnd(`🎙️ [WHISPER] ${customerPhone}`);
                             return transcription.text;
-                        } catch (e) { console.error('❌ [AUDIO ERROR]', e.message); return text; }
+                        } catch (e) { 
+                            console.error('❌ [AUDIO ERROR]', e.message, e.response?.data); 
+                            return text; 
+                        }
                     }
                     return text;
                 })(),
@@ -635,7 +659,15 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 if (lastMsg.sender === 'bot' && (text.startsWith(lastMsg.text.substring(0, 20)) || lastMsg.text.startsWith(text.substring(0, 20)))) return;
             }
 
-            activeChat.messages.push({ sender: 'customer', text });
+            const isAudio = msgType.toLowerCase() === 'audio' || msgType.toLowerCase() === 'voice';
+            const audioUrl = message.attachment?.url || message.media?.url || message.media_url || '';
+
+            activeChat.messages.push({ 
+                sender: 'customer', 
+                text, 
+                msgType: isAudio ? 'audio' : 'text',
+                mediaUrl: isAudio ? audioUrl : ''
+            });
             activeChat.lastUpdate = new Date();
             
             // --- BACKGROUND SAVE + AI PROCESS ---
@@ -656,7 +688,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 console.timeEnd(`🔍 [RAG+AI] ${customerPhone}`);
 
                 // --- SEND & FINAL SAVE ---
-                const authKey = client.apiKey || INTERAKT_KEY;
                 if (!authKey) console.warn(`⚠️ [WHATSAPP] No API Key found for client ${clientId}. Message not sent.`);
 
                 await Promise.all([
@@ -674,7 +705,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         }
                     })(),
                     (async () => {
-                        activeChat.messages.push({ sender: 'bot', text: response });
+                        activeChat.messages.push({ sender: 'bot', text: response, msgType: 'text' });
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
                     })()

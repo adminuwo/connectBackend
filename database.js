@@ -74,7 +74,13 @@ const TicketSchema = new mongoose.Schema({
 const ChatSchema = new mongoose.Schema({
     clientId: String,
     customerPhone: String,
-    messages: [{ sender: String, text: String, timestamp: { type: Date, default: Date.now } }],
+    messages: [{ 
+        sender: String, 
+        text: String, 
+        msgType: { type: String, default: 'text' }, 
+        mediaUrl: { type: String, default: '' },
+        timestamp: { type: Date, default: Date.now } 
+    }],
     lastUpdate: { type: Date, default: Date.now }
 });
 
