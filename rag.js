@@ -192,8 +192,8 @@ class SimpleRAG {
             - **Professional Tone**: Sophisticated, elite, and conversational. Speak like a high-end consultant.
             - **Natural Flow**: Avoid over-using bullet points or lists. Only use them when listing specific features or benefits.
             - **Formatting**: Use *asterisks* sparingly for emphasis. Use single newlines for clean spacing.
-            - **Emojis**: Use rapport-building emojis naturally and strategically, not in every sentence.
-            - **Style**: Avoid using green checkmarks (✅) for every single line. Keep it varied and human-like.
+            - **Emojis**: Use emojis balancedly to make the conversation friendly and engaging (approx 1-3 emojis per response). Avoid over-using them in every single sentence, but don't be too dry either.
+            - **Style**: Use varied emojis like 🚀, ✨, 🤝, 📈, or 💡 that match the context. Avoid using green checkmarks (✅) for every single line. Keep it varied and human-like.
 
             If information is missing from the context, use your expert AI knowledge to provide a compelling and logical sales response.
 

@@ -549,13 +549,12 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         }
 
         // 1. Extract and Normalize Data Immediately
-        const text = (message.text || message.message || "").trim();
+        let text = (message.text || message.message || "").trim();
+        const msgType = message.type || "Text";
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
         let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
         if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
         if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
-
-        if (!text) return res.sendStatus(200);
 
         // --- ASYNC PROCESSING ---
         const messageId = message.id || "no-id";
@@ -581,6 +580,38 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 return;
             }
 
+            // --- AUDIO TRANSCRIPTION ---
+            if ((msgType === 'Audio' || msgType === 'audio') && openai) {
+                const audioUrl = message.attachment?.url;
+                if (audioUrl) {
+                    try {
+                        console.log(`🎙️ [AUDIO] Processing audio from ${customerPhone}...`);
+                        const audioResponse = await axios({ url: audioUrl, method: 'GET', responseType: 'stream' });
+                        const tempDir = path.join(__dirname, 'temp_audio');
+                        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+                        const tempPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
+                        const writer = fs.createWriteStream(tempPath);
+                        audioResponse.data.pipe(writer);
+                        await new Promise((resolve, reject) => {
+                            writer.on('finish', resolve);
+                            writer.on('error', reject);
+                        });
+
+                        const transcription = await openai.audio.transcriptions.create({
+                            file: fs.createReadStream(tempPath),
+                            model: "whisper-1",
+                        });
+                        text = transcription.text;
+                        console.log(`🎙️ [AUDIO] Transcribed: ${text}`);
+                        fs.unlinkSync(tempPath);
+                    } catch (audioErr) {
+                        console.error('❌ [AUDIO ERROR]', audioErr.message);
+                    }
+                }
+            }
+
+            if (!text || text === "Media/Unsupported message") return;
+
             let chat = await Chat.findOne({ clientId, customerPhone });
             if (!chat) {
                 chat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
@@ -598,7 +629,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             chat.lastUpdate = new Date();
             await chat.save();
 
-            if (openai && text !== "Media/Unsupported message") {
+            if (openai) {
                 const normalizedMsg = text.toLowerCase().trim();
                 const triggerRegex = /^(hy|h|hye|hi|hii|hello|hey|hie|hye|hiii|heyy|namaste|aslam|ji|start|help)$/i;
                 
@@ -610,7 +641,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 
                 // 2. For everything else, use AI Bot
                 console.log(`🧠 [AI ACTIVATE] Processing query: ${text}`);
-                response = await rag.query(clientId, text);
+                let response = await rag.query(clientId, text);
 
                 try {
                     await axios.post('https://api.interakt.ai/v1/public/message/', {
