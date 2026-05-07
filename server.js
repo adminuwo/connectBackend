@@ -6,7 +6,16 @@ const fs = require('fs');
 const multer = require('multer');
 const axios = require('axios');
 
-// For deduplication
+const nodemailer = require('nodemailer');
+
+// Email Transporter Configuration
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
 const lastBotMessages = new Map();
 const processedMessageIds = new Set(); // To prevent processing retried webhooks
 const inFlightRequests = new Set(); // To prevent concurrent processing for same phone
@@ -220,9 +229,21 @@ app.post('/api/auth/send-otp', async (req, res) => {
     try {
         const newOtp = new OTP({ email, otp });
         await newOtp.save();
-        console.log(`[OTP] Sent to ${email}: ${otp}`);
-        res.json({ success: true, message: 'OTP sent' });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: 'Verification Code - Whatsabot',
+            text: `Your OTP for Whatsabot registration is: ${otp}. This code will expire in 10 minutes.`
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log(`✅ [OTP] Sent to ${email}: ${otp}`);
+        res.json({ success: true, message: 'OTP sent to your email.' });
+    } catch (err) { 
+        console.error('❌ [OTP ERROR]', err.message);
+        res.status(500).json({ error: 'Failed to send OTP email.' }); 
+    }
 });
 
 app.post('/api/auth/register', async (req, res) => {
@@ -234,7 +255,7 @@ app.post('/api/auth/register', async (req, res) => {
         const existing = await Client.findOne({ email });
         if (existing) return res.status(400).json({ error: 'Email already registered' });
 
-        const client = new Client({ name, email, password, whatsappNumber, businessName, businessType, status: 'pending' });
+        const client = new Client({ name, email, password, status: 'pending' });
         await client.save();
 
         // Create initial RAG folder
