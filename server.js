@@ -603,8 +603,10 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             // --- PARALLEL: Audio Transcription + Chat Lookup ---
             const [transcribedText, chat] = await Promise.all([
                 (async () => {
-                    if ((msgType === 'Audio' || msgType === 'audio') && openai) {
-                        const audioUrl = message.attachment?.url;
+                    const isAudio = msgType.toLowerCase() === 'audio' || msgType.toLowerCase() === 'voice';
+                    if (isAudio && openai) {
+                        const audioUrl = message.attachment?.url || message.media?.url;
+                        console.log(`🎙️ [AUDIO] Detected audio message. URL: ${audioUrl}`);
                         if (!audioUrl) return text;
                         try {
                             const audioResponse = await axios({ url: audioUrl, method: 'GET', responseType: 'stream' });
@@ -613,10 +615,12 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                             const writer = fs.createWriteStream(tempPath);
                             audioResponse.data.pipe(writer);
                             await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
+                            console.log(`🎙️ [AUDIO] File saved locally: ${tempPath}. Transcribing...`);
                             const transcription = await openai.audio.transcriptions.create({ file: fs.createReadStream(tempPath), model: "whisper-1" });
                             fs.unlink(tempPath, () => {}); // Background cleanup
+                            console.log(`🎙️ [AUDIO] Transcribed Text: ${transcription.text}`);
                             return transcription.text;
-                        } catch (e) { console.error('❌ [AUDIO ERR]', e.message); return text; }
+                        } catch (e) { console.error('❌ [AUDIO ERROR]', e.message); return text; }
                     }
                     return text;
                 })(),
