@@ -220,12 +220,12 @@ class SimpleRAG {
 
             results.sort((a, b) => b.similarity - a.similarity);
             
-            // Return top results with similarity > 0.18 threshold (very inclusive for multi-topic queries)
-            // We take top 8 chunks to cover multiple topics in one go
-            const relevant = results.filter(r => r.similarity > 0.18).slice(0, 8);
+            // Return top results with similarity > 0.12 threshold (highly inclusive for Hindi/Hinglish)
+            // We take top 8 chunks to cover all possible topics
+            const relevant = results.filter(r => r.similarity > 0.12).slice(0, 8);
             
             if (relevant.length === 0) {
-                console.log(`[RAG] 🔍 SEARCH FAILED for: "${query}" | Best similarity was: ${results[0]?.similarity.toFixed(2)} (Threshold: 0.18)`);
+                console.log(`[RAG] 🔍 SEARCH FAILED for: "${query}" | Best similarity was: ${results[0]?.similarity.toFixed(2)} (Threshold: 0.12)`);
                 return ''; 
             }
 
@@ -270,7 +270,7 @@ class SimpleRAG {
             const lowerQuery = userQuery.toLowerCase().trim();
             
             // 1. LIGHTWEIGHT CONVERSATIONAL LAYER (Greetings/Farewells)
-            const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'namaste', 'salam', 'hola'];
+            const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'namaste', 'salam', 'hola', 'kaise ho', 'how are you'];
             const farewells = ['bye', 'goodbye', 'see you', 'thanks', 'thank you', 'dhanyawad', 'shukriya'];
             
             const isGreeting = greetings.some(g => lowerQuery === g || lowerQuery.startsWith(g + ' '));
@@ -278,8 +278,8 @@ class SimpleRAG {
 
             if (isGreeting || isFarewell) {
                 const prompt = isGreeting 
-                    ? "Reply to this greeting politely and professionally as a smart business assistant. Keep it short and friendly. Use the same language as the user."
-                    : "Reply to this thank you or farewell politely. Keep it short and professional. Use the same language as the user.";
+                    ? "Reply to this greeting politely and professionally. Use the same language as the user."
+                    : "Reply to this thank you or farewell politely. Use the same language as the user.";
                 
                 const completion = await this.openai.chat.completions.create({
                     model: "gpt-4o-mini",
@@ -302,7 +302,7 @@ class SimpleRAG {
                     messages: [
                         { 
                             role: "system", 
-                            content: "You are a query optimizer. Given the following conversation history and a new user message, rewrite the message into a STANDALONE search query that can be used for document retrieval. Keep it concise. If the message is already standalone, just return it as is. NEVER answer the question, only rewrite it." 
+                            content: "You are an expert query optimizer. Convert the user's latest message into a STANDALONE search query. If the user is asking a question within a conversation (e.g., 'Tell me more', 'Explain this'), use the history to determine the exact topic (e.g., 'Explain Legal AI features'). IMPORTANT: Extract only the core topic and keywords. Clean out conversational filler like 'Mein badiya hu' or 'achha thik hai'." 
                         },
                         { role: "user", content: `HISTORY:\n${historyText}\n\nNEW MESSAGE: ${userQuery}` }
                     ],
@@ -310,6 +310,21 @@ class SimpleRAG {
                 });
                 standaloneQuery = condensation.choices[0].message.content.trim();
                 console.log(`🧠 [AI] Standalone Query: "${standaloneQuery}"`);
+            } else {
+                // Even for first message, try to extract core topic if it has filler
+                const extraction = await this.openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    messages: [
+                        { 
+                            role: "system", 
+                            content: "Extract the core search topic/question from the user message. Remove conversational filler like 'Kaise ho', 'I am fine', 'Badiya hu'. Just return the core topic. Example: 'Mein badiya hu mujhe Legal AI ke baare mein batao' -> 'Legal AI information'." 
+                        },
+                        { role: "user", content: userQuery }
+                    ],
+                    temperature: 0
+                });
+                standaloneQuery = extraction.choices[0].message.content.trim();
+                console.log(`🧠 [AI] Extracted Topic: "${standaloneQuery}"`);
             }
 
             // 3. IMAGE GENERATION LAYER
