@@ -100,8 +100,11 @@ class SimpleRAG {
                 let chunk = rawChunks[i].trim();
                 if (!chunk) continue;
                 
+                // Clean file name for metadata (remove numeric prefixes/IDs)
+                const cleanFileName = file.replace(/^\d+[\s_-]*/, '').replace(/\.[^/.]+$/, "").replace(/_/g, " ").replace(/-/g, " ");
+                
                 // Add Source Metadata to the chunk text
-                const chunkWithMeta = `[Source Document: ${file}]\n${chunk}`;
+                const chunkWithMeta = `[Source Document: ${cleanFileName}]\n${chunk}`;
 
                 try {
                     process.stdout.write(`[RAG] 🧠 Embedding ${file} (Part ${i+1}/${rawChunks.length})... \r`);
@@ -126,7 +129,7 @@ class SimpleRAG {
     }
 
     chunkText(text, maxChars) {
-        // Semantic Chunking: First split by logical boundaries like double newlines (paragraphs)
+        const overlap = Math.floor(maxChars * 0.15); // 15% overlap for better context
         const paragraphs = text.split(/\n\s*\n/);
         let chunks = [];
         let currentChunk = '';
@@ -135,21 +138,20 @@ class SimpleRAG {
             const cleanP = p.trim();
             if (!cleanP) continue;
 
-            // If a single paragraph is larger than maxChars, break it down by sentences or small blocks
             if (cleanP.length > maxChars) {
                 if (currentChunk) {
                     chunks.push(currentChunk.trim());
                     currentChunk = '';
                 }
                 
-                // Split long paragraph into sentence-like chunks
                 const sentences = cleanP.match(/[^\.!\?]+[\.!\?]+/g) || [cleanP];
                 for (const s of sentences) {
                     if ((currentChunk.length + s.length) < maxChars) {
                         currentChunk += s + ' ';
                     } else {
                         if (currentChunk) chunks.push(currentChunk.trim());
-                        currentChunk = s + ' ';
+                        // Maintain overlap
+                        currentChunk = currentChunk.slice(-overlap) + s + ' ';
                     }
                 }
                 continue;
@@ -159,7 +161,7 @@ class SimpleRAG {
                 currentChunk += cleanP + '\n\n';
             } else {
                 if (currentChunk) chunks.push(currentChunk.trim());
-                currentChunk = cleanP + '\n\n';
+                currentChunk = currentChunk.slice(-overlap) + cleanP + '\n\n';
             }
         }
         if (currentChunk) chunks.push(currentChunk.trim());
@@ -218,15 +220,12 @@ class SimpleRAG {
 
             results.sort((a, b) => b.similarity - a.similarity);
             
-            // Return top results with similarity > 0.40 threshold (stricter for premium accuracy)
-            // We take top 3 chunks to avoid context window clutter and maintain topic consistency
-            const relevant = results.filter(r => r.similarity > 0.40).slice(0, 3);
+            // Return top results with similarity > 0.25 threshold (more inclusive for varied documents)
+            // We take top 5 chunks for a broader context window
+            const relevant = results.filter(r => r.similarity > 0.25).slice(0, 5);
             
             if (relevant.length === 0) {
-                // If top similarity is very low (e.g. < 0.25), it's definitely not in KB
-                // If it's between 0.25 and 0.40, we might still want to try but be cautious
-                // For now, let's stick to 0.40 for strictness as requested.
-                console.log(`[RAG] 🔍 No high-confidence context for: "${query}" (Best: ${results[0]?.similarity.toFixed(2)})`);
+                console.log(`[RAG] 🔍 No context found for: "${query}" (Best similarity: ${results[0]?.similarity.toFixed(2)})`);
                 return ''; 
             }
             return relevant.map(r => r.text).join('\n\n---\n\n');
@@ -334,22 +333,11 @@ class SimpleRAG {
             // 3. RAG LAYER
             const context = await this.search(clientId, userQuery);
 
-            // If no relevant context found, provide the specific "not found" message with available topics
+            // If no relevant context found, provide a clean "not found" message
             if (!context || context.trim() === '') {
-                const chunks = this.clientChunks[clientId] || [];
-                const topics = [...new Set(chunks.map(c => c.source))];
-                
-                if (topics.length === 0) {
-                    return { text: "Maaf kijiye, abhi is business ki koi jaankari mere paas nahi hai. 🙏" };
-                }
-
-                let response = "Iss topic ke baare mein mere paas abhi jaankari nahi hai. 🙏\n\nAap mujhse in topics ke baare mein puch sakte hain:\n\n";
-                topics.forEach((t, i) => {
-                    const cleanName = t.replace(/\.[^/.]+$/, "").replace(/_/g, " ").replace(/-/g, " ");
-                    response += `${i + 1}. ${cleanName.charAt(0).toUpperCase() + cleanName.slice(1)}\n`;
-                });
-                response += "\nKripya inme se kisi topic par sawal puchein! ✨";
-                return { text: response };
+                return { 
+                    text: "Maaf kijiye, iss topic ke baare mein mere paas abhi jaankari nahi hai. Kya main kisi aur cheez mein aapki madad kar sakta hoon? 🙏" 
+                };
             }
 
             const systemPrompt = `You are an expert AI Business Assistant. Your goal is to provide premium, human-like customer support using ONLY the provided BUSINESS CONTEXT.
