@@ -367,25 +367,41 @@ class SimpleRAG {
 STRICT INSTRUCTIONS:
 1. ONLY use information from the BUSINESS CONTEXT. 
 2. MULTI-TOPIC SUPPORT: If the user asks about multiple topics at once, look for information on all of them in the context and provide a combined, cohesive response.
-3. If information on ANY part of the query is missing, answer what you know and politely ask for more details on the missing parts.
-4. If the entire answer is not in the context, say: "Maaf kijiye, iss topic ke baare mein mere paas abhi jaankari nahi hai. Kya main kisi aur cheez mein aapki madad kar sakta hoon?"
-5. LANGUAGE: Always reply in the same language as the customer (Hindi, Hinglish, or English).
-6. NO TECHNICAL JARGON: Never mention "documents", "context", "database", "chunks", "files", or "RAG".
-7. FORMATTING: Use clean, plain text. ABSOLUTELY NO Markdown (no asterisks *, no underscores _, no bold tags).
-8. STRUCTURE: Use short paragraphs and clear numbered lists for multiple points or topics.
-9. TONE: Professional, confident, and helpful. Sound like a high-end human assistant.
-10. WHATSAPP UX: Keep messages concise and easy to read on mobile screens. Use proper line breaks.
+3. CONVERSATIONAL FLOW: Maintain a natural, ChatGPT-like baatcheet. Reference previous parts of the conversation if relevant.
+4. If information on ANY part of the query is missing, answer what you know and politely ask for more details on the missing parts.
+5. If the entire answer is not in the context, say: "Maaf kijiye, iss topic ke baare mein mere paas abhi jaankari nahi hai. Kya main kisi aur cheez mein aapki madad kar sakta hoon?"
+6. LANGUAGE: Always reply in the same language as the customer (Hindi, Hinglish, or English).
+7. NO TECHNICAL JARGON: Never mention "documents", "context", "database", "chunks", "files", or "RAG".
+8. FORMATTING: Use clean, plain text. ABSOLUTELY NO Markdown (no asterisks *, no underscores _, no bold tags).
+9. STRUCTURE: Use short paragraphs and clear numbered lists for multiple points or topics.
+10. TONE: Professional, confident, and helpful. Sound like a high-end human assistant.
+11. WHATSAPP UX: Keep messages concise and easy to read on mobile screens. Use proper line breaks.
 
 BUSINESS CONTEXT:
 ${context}
 `;
 
+            // Prepare messages with History for ChatGPT-like flow
+            const messages = [
+                { role: "system", content: systemPrompt }
+            ];
+
+            // Add history (mapped to OpenAI roles)
+            if (chatHistory && chatHistory.length > 0) {
+                chatHistory.forEach(m => {
+                    messages.push({ 
+                        role: m.sender === 'bot' ? 'assistant' : 'user', 
+                        content: m.text 
+                    });
+                });
+            }
+
+            // Add the current user query (or standalone query)
+            messages.push({ role: "user", content: userQuery });
+
             const completion = await this.openai.chat.completions.create({
                 model: "gpt-4o-mini",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userQuery }
-                ],
+                messages: messages,
                 temperature: 0.5
             });
 
