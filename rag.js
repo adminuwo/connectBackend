@@ -292,39 +292,32 @@ class SimpleRAG {
                 return { text: completion.choices[0].message.content.replace(/\*/g, '') };
             }
 
-            // 2. QUERY CONDENSATION (Context Awareness)
+            // 2. QUERY CONDENSATION (Context Awareness) - Optimized for SPEED
             let standaloneQuery = userQuery;
-            if (chatHistory && chatHistory.length > 0) {
-                console.log(`🧠 [AI] Condensing query using ${chatHistory.length} history messages...`);
-                const historyText = chatHistory.map(m => `${m.sender}: ${m.text}`).join('\n');
+            const pronouns = ['this', 'it', 'they', 'them', 'those', 'these', 'that', 'he', 'she', 'iske', 'woh', 'yeh', 'unka', 'iska'];
+            const needsCondensation = pronouns.some(p => lowerQuery.includes(p)) || lowerQuery.length < 10;
+
+            if (chatHistory && chatHistory.length > 0 && needsCondensation) {
+                console.log(`🧠 [AI] Condensing query (History + Needs context)...`);
+                const historyText = chatHistory.slice(-3).map(m => `${m.sender}: ${m.text}`).join('\n');
                 const condensation = await this.openai.chat.completions.create({
                     model: "gpt-4o-mini",
                     messages: [
                         { 
                             role: "system", 
-                            content: "You are an expert query optimizer. Convert the user's latest message into a STANDALONE search query. If the user is asking a question within a conversation (e.g., 'Tell me more', 'Explain this'), use the history to determine the exact topic (e.g., 'Explain Legal AI features'). IMPORTANT: Extract only the core topic and keywords. Clean out conversational filler like 'Mein badiya hu' or 'achha thik hai'." 
+                            content: "Convert user message into a STANDALONE search query. Use history to resolve 'it', 'this', etc. Keep it to 3-5 keywords. Return ONLY the query." 
                         },
                         { role: "user", content: `HISTORY:\n${historyText}\n\nNEW MESSAGE: ${userQuery}` }
                     ],
-                    temperature: 0
+                    temperature: 0,
+                    max_tokens: 20 // Speed up by limiting tokens
                 });
                 standaloneQuery = condensation.choices[0].message.content.trim();
-                console.log(`🧠 [AI] Standalone Query: "${standaloneQuery}"`);
-            } else {
-                // Even for first message, try to extract core topic if it has filler
-                const extraction = await this.openai.chat.completions.create({
-                    model: "gpt-4o-mini",
-                    messages: [
-                        { 
-                            role: "system", 
-                            content: "Extract the core search topic/question from the user message. Remove conversational filler like 'Kaise ho', 'I am fine', 'Badiya hu'. Just return the core topic. Example: 'Mein badiya hu mujhe Legal AI ke baare mein batao' -> 'Legal AI information'." 
-                        },
-                        { role: "user", content: userQuery }
-                    ],
-                    temperature: 0
-                });
-                standaloneQuery = extraction.choices[0].message.content.trim();
-                console.log(`🧠 [AI] Extracted Topic: "${standaloneQuery}"`);
+            } else if (lowerQuery.split(' ').length > 4) {
+                // For long queries, just clean them locally if possible or use a very fast check
+                // If it's long, it likely contains the keywords already.
+                console.log(`🚀 [AI] Fast-tracking long query: "${userQuery}"`);
+                standaloneQuery = userQuery.replace(/kaise ho|mein badiya hu|i am fine|hello|hi/gi, '').trim();
             }
 
             // 3. IMAGE GENERATION LAYER
