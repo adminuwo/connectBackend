@@ -691,7 +691,13 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 // Normalize query
                 const normalizedQuery = text.toLowerCase().trim().replace(/\s+/g, ' ');
                 
-                const ragResponse = await rag.query(clientId, normalizedQuery);
+                // Get last 5 messages for context awareness
+                const chatHistory = activeChat.messages.slice(-5).map(m => ({
+                    sender: m.sender,
+                    text: m.text
+                }));
+
+                const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory);
                 
                 // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
                 let response = ragResponse.text.replace(/\*/g, '').replace(/_/g, '').replace(/###/g, '').trim();

@@ -263,7 +263,7 @@ class SimpleRAG {
         }
     }
 
-    async query(clientId, userQuery) {
+    async query(clientId, userQuery, chatHistory = []) {
         if (!this.openai) return { text: "I'm sorry, my AI features are currently offline." };
         
         try {
@@ -292,8 +292,28 @@ class SimpleRAG {
                 return { text: completion.choices[0].message.content.replace(/\*/g, '') };
             }
 
-            // 2. IMAGE GENERATION LAYER
-            const isImageRequest = /\b(generate|create|make|banao|bana|show)\b.*\b(image|photo|picture|pic|drawing|image)\b/i.test(lowerQuery);
+            // 2. QUERY CONDENSATION (Context Awareness)
+            let standaloneQuery = userQuery;
+            if (chatHistory && chatHistory.length > 0) {
+                console.log(`🧠 [AI] Condensing query using ${chatHistory.length} history messages...`);
+                const historyText = chatHistory.map(m => `${m.sender}: ${m.text}`).join('\n');
+                const condensation = await this.openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    messages: [
+                        { 
+                            role: "system", 
+                            content: "You are a query optimizer. Given the following conversation history and a new user message, rewrite the message into a STANDALONE search query that can be used for document retrieval. Keep it concise. If the message is already standalone, just return it as is. NEVER answer the question, only rewrite it." 
+                        },
+                        { role: "user", content: `HISTORY:\n${historyText}\n\nNEW MESSAGE: ${userQuery}` }
+                    ],
+                    temperature: 0
+                });
+                standaloneQuery = condensation.choices[0].message.content.trim();
+                console.log(`🧠 [AI] Standalone Query: "${standaloneQuery}"`);
+            }
+
+            // 3. IMAGE GENERATION LAYER
+            const isImageRequest = /\b(generate|create|make|banao|bana|show)\b.*\b(image|photo|picture|pic|drawing|image)\b/i.test(standaloneQuery.toLowerCase());
 
             if (isImageRequest) {
                 console.log(`🎨 [GEMINI] Generating image for: ${userQuery}`);
@@ -332,8 +352,8 @@ class SimpleRAG {
                 }
             }
 
-            // 3. RAG LAYER
-            const context = await this.search(clientId, userQuery);
+            // 4. RAG LAYER
+            const context = await this.search(clientId, standaloneQuery);
 
             // If no relevant context found, provide a clean "not found" message
             if (!context || context.trim() === '') {
