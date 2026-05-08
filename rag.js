@@ -297,30 +297,29 @@ class SimpleRAG {
                 return { text: completion.choices[0].message.content.replace(/\*/g, '') };
             }
 
-            // 2. QUERY CONDENSATION (Context Awareness) - Optimized for SPEED
+            // 2. QUERY CONDENSATION (Context Awareness) - Optimized for SPEED & BRAND-AWARENESS
             let standaloneQuery = userQuery;
-            const pronouns = ['this', 'it', 'they', 'them', 'those', 'these', 'that', 'he', 'she', 'iske', 'woh', 'yeh', 'unka', 'iska'];
+            const pronouns = ['this', 'it', 'they', 'them', 'those', 'these', 'that', 'he', 'she', 'iske', 'woh', 'yeh', 'unka', 'iska', 'pricing', 'price', 'rates', 'details'];
             const needsCondensation = pronouns.some(p => lowerQuery.includes(p)) || lowerQuery.length < 10;
 
             if (chatHistory && chatHistory.length > 0 && needsCondensation) {
-                console.log(`🧠 [AI] Condensing query (History + Needs context)...`);
+                console.log(`🧠 [AI] Condensing query (History + Brand Focus)...`);
                 const historyText = chatHistory.slice(-3).map(m => `${m.sender}: ${m.text}`).join('\n');
                 const condensation = await this.openai.chat.completions.create({
                     model: "gpt-4o-mini",
                     messages: [
                         { 
                             role: "system", 
-                            content: "Convert user message into a STANDALONE search query. Use history to resolve 'it', 'this', etc. Keep it to 3-5 keywords. Return ONLY the query." 
+                            content: "You are an expert query optimizer. Convert the user's latest message into a STANDALONE search query. If a specific brand or topic was discussed previously (e.g. Aimall, AISA, Legal AI), ensure it is included in the new query to avoid ambiguity. Extract only core keywords. Return ONLY the query." 
                         },
                         { role: "user", content: `HISTORY:\n${historyText}\n\nNEW MESSAGE: ${userQuery}` }
                     ],
                     temperature: 0,
-                    max_tokens: 20 // Speed up by limiting tokens
+                    max_tokens: 30
                 });
                 standaloneQuery = condensation.choices[0].message.content.trim();
+                console.log(`🧠 [AI] Brand-Aware Query: "${standaloneQuery}"`);
             } else if (lowerQuery.split(' ').length > 4) {
-                // For long queries, just clean them locally if possible or use a very fast check
-                // If it's long, it likely contains the keywords already.
                 console.log(`🚀 [AI] Fast-tracking long query: "${userQuery}"`);
                 standaloneQuery = userQuery.replace(/kaise ho|mein badiya hu|i am fine|hello|hi/gi, '').trim();
             }
