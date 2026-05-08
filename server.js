@@ -671,73 +671,56 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             activeChat.lastUpdate = new Date();
             
             // --- BACKGROUND SAVE + AI PROCESS ---
-            // Don't wait for first save to start AI
-            activeChat.save().catch(e => console.error('❌ [SAVE ERR]', e.message));
-
             if (openai) {
-                const normalizedMsg = text.toLowerCase().trim();
-                const triggerRegex = /^(hy|h|hye|hi|hii|hello|hey|hie|hye|hiii|heyy|namaste|aslam|ji|start|help)$/i;
-                if (triggerRegex.test(normalizedMsg) || normalizedMsg.length <= 1) {
-                    console.timeEnd(`⏱️ [TOTAL TIME] ${customerPhone}`);
-                    return;
-                }
-
                 console.log(`🧠 [AI] Processing: ${text}`);
                 console.time(`🔍 [RAG+AI] ${customerPhone}`);
                 
-                // Normalize query to handle AIMALL vs AI MALL vs aimall
+                // Normalize query
                 const normalizedQuery = text.toLowerCase().trim().replace(/\s+/g, ' ');
                 
                 const ragResponse = await rag.query(clientId, normalizedQuery);
                 
-                // CLEAN RESPONSE: Remove asterisks as requested by user
-                let response = ragResponse.text.replace(/\*/g, '');
-                
+                // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
+                let response = ragResponse.text.replace(/\*/g, '').replace(/_/g, '').replace(/###/g, '').trim();
                 const imageUrl = ragResponse.imageUrl;
                 console.timeEnd(`🔍 [RAG+AI] ${customerPhone}`);
 
-                // --- SEND & FINAL SAVE ---
-                if (!authKey) console.warn(`⚠️ [WHATSAPP] No API Key found for client ${clientId}. Message not sent.`);
-
-                await Promise.all([
-                    (async () => {
-                        if (!authKey) return;
-                        try {
-                            // 1. Send Text Reply
+                if (response || imageUrl) {
+                    try {
+                        // 1. Send Text Reply
+                        if (response) {
                             await axios.post('https://api.interakt.ai/v1/public/message/', {
                                 fullPhoneNumber: customerPhone,
                                 type: 'Text',
                                 data: { message: response }
                             }, { headers: { 'Authorization': `Basic ${authKey}` } });
+                        }
 
-                            // 2. If Image Generated, Send Image
-                            if (imageUrl) {
-                                console.log(`🎨 [WHATSAPP] Sending generated image to ${customerPhone}`);
-                                await axios.post('https://api.interakt.ai/v1/public/message/', {
-                                    fullPhoneNumber: customerPhone,
-                                    type: 'Image',
-                                    data: { mediaUrl: imageUrl }
-                                }, { headers: { 'Authorization': `Basic ${authKey}` } });
-                            }
-                            console.log(`✅ [WHATSAPP] All messages sent to ${customerPhone}.`);
-                        } catch (apiErr) {
-                            console.error(`❌ [WHATSAPP ERROR] Failed for ${customerPhone}:`, apiErr.response?.data || apiErr.message);
-                        }
-                    })(),
-                    (async () => {
-                        activeChat.messages.push({ sender: 'bot', text: response, msgType: 'text' });
+                        // 2. Send Image if generated
                         if (imageUrl) {
-                            activeChat.messages.push({ 
-                                sender: 'bot', 
-                                text: 'Generated Image', 
-                                msgType: 'image', 
-                                mediaUrl: imageUrl 
-                            });
+                            await axios.post('https://api.interakt.ai/v1/public/message/', {
+                                fullPhoneNumber: customerPhone,
+                                type: 'Image',
+                                data: {
+                                    title: response || "Generated Image",
+                                    originalUrl: imageUrl,
+                                    previewUrl: imageUrl
+                                }
+                            }, { headers: { 'Authorization': `Basic ${authKey}` } });
                         }
+
+                        // 3. Save everything to DB
+                        if (response) activeChat.messages.push({ sender: 'bot', text: response, msgType: 'text' });
+                        if (imageUrl) activeChat.messages.push({ sender: 'bot', text: 'Generated Image', msgType: 'image', mediaUrl: imageUrl });
+                        
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
-                    })()
-                ]);
+                        
+                        console.log(`✅ [BOT SENT] to ${customerPhone}`);
+                    } catch (apiErr) {
+                        console.error(`❌ [WHATSAPP ERROR]`, apiErr.response?.data || apiErr.message);
+                    }
+                }
                 console.timeEnd(`⏱️ [TOTAL TIME] ${customerPhone}`);
             }
         } catch (err) {

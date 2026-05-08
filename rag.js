@@ -126,30 +126,43 @@ class SimpleRAG {
     }
 
     chunkText(text, maxChars) {
-        // First split by double newlines (paragraphs)
-        const paragraphs = text.split('\n\n');
+        // Semantic Chunking: First split by logical boundaries like double newlines (paragraphs)
+        const paragraphs = text.split(/\n\s*\n/);
         let chunks = [];
         let currentChunk = '';
 
         for (const p of paragraphs) {
-            // If a single paragraph is larger than maxChars, break it down further
-            if (p.length > maxChars) {
-                if (currentChunk.trim()) chunks.push(currentChunk.trim());
-                currentChunk = '';
+            const cleanP = p.trim();
+            if (!cleanP) continue;
+
+            // If a single paragraph is larger than maxChars, break it down by sentences or small blocks
+            if (cleanP.length > maxChars) {
+                if (currentChunk) {
+                    chunks.push(currentChunk.trim());
+                    currentChunk = '';
+                }
                 
-                const subChunks = p.match(new RegExp(`[\\s\\S]{1,${maxChars}}`, 'g')) || [];
-                chunks = chunks.concat(subChunks);
+                // Split long paragraph into sentence-like chunks
+                const sentences = cleanP.match(/[^\.!\?]+[\.!\?]+/g) || [cleanP];
+                for (const s of sentences) {
+                    if ((currentChunk.length + s.length) < maxChars) {
+                        currentChunk += s + ' ';
+                    } else {
+                        if (currentChunk) chunks.push(currentChunk.trim());
+                        currentChunk = s + ' ';
+                    }
+                }
                 continue;
             }
 
-            if ((currentChunk.length + p.length) < maxChars) {
-                currentChunk += p + '\n\n';
+            if ((currentChunk.length + cleanP.length) < maxChars) {
+                currentChunk += cleanP + '\n\n';
             } else {
-                if (currentChunk.trim()) chunks.push(currentChunk.trim());
-                currentChunk = p + '\n\n';
+                if (currentChunk) chunks.push(currentChunk.trim());
+                currentChunk = cleanP + '\n\n';
             }
         }
-        if (currentChunk.trim()) chunks.push(currentChunk.trim());
+        if (currentChunk) chunks.push(currentChunk.trim());
         return chunks;
     }
 
@@ -204,12 +217,17 @@ class SimpleRAG {
             }));
 
             results.sort((a, b) => b.similarity - a.similarity);
-            // Return top results with similarity > 0.35 threshold (stricter for better accuracy)
-            const relevant = results.filter(r => r.similarity > 0.35).slice(0, topK);
+            
+            // Return top results with similarity > 0.40 threshold (stricter for premium accuracy)
+            // We take top 3 chunks to avoid context window clutter and maintain topic consistency
+            const relevant = results.filter(r => r.similarity > 0.40).slice(0, 3);
             
             if (relevant.length === 0) {
-                console.log(`[RAG] 🔍 No relevant context found for query: "${query}" (Top similarity: ${results[0]?.similarity.toFixed(2)})`);
-                return ''; // No relevant context found
+                // If top similarity is very low (e.g. < 0.25), it's definitely not in KB
+                // If it's between 0.25 and 0.40, we might still want to try but be cautious
+                // For now, let's stick to 0.40 for strictness as requested.
+                console.log(`[RAG] 🔍 No high-confidence context for: "${query}" (Best: ${results[0]?.similarity.toFixed(2)})`);
+                return ''; 
             }
             return relevant.map(r => r.text).join('\n\n---\n\n');
         } catch (error) {
@@ -248,7 +266,32 @@ class SimpleRAG {
         if (!this.openai) return { text: "I'm sorry, my AI features are currently offline." };
         
         try {
-            const lowerQuery = userQuery.toLowerCase();
+            const lowerQuery = userQuery.toLowerCase().trim();
+            
+            // 1. LIGHTWEIGHT CONVERSATIONAL LAYER (Greetings/Farewells)
+            const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'namaste', 'salam', 'hola'];
+            const farewells = ['bye', 'goodbye', 'see you', 'thanks', 'thank you', 'dhanyawad', 'shukriya'];
+            
+            const isGreeting = greetings.some(g => lowerQuery === g || lowerQuery.startsWith(g + ' '));
+            const isFarewell = farewells.some(f => lowerQuery === f || lowerQuery.startsWith(f + ' '));
+
+            if (isGreeting || isFarewell) {
+                const prompt = isGreeting 
+                    ? "Reply to this greeting politely and professionally as a smart business assistant. Keep it short and friendly. Use the same language as the user."
+                    : "Reply to this thank you or farewell politely. Keep it short and professional. Use the same language as the user.";
+                
+                const completion = await this.openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    messages: [
+                        { role: "system", content: "You are a professional business assistant. Reply naturally and politely. Do NOT mention RAG or documents." },
+                        { role: "user", content: `${prompt}\n\nUser said: ${userQuery}` }
+                    ],
+                    temperature: 0.7
+                });
+                return { text: completion.choices[0].message.content.replace(/\*/g, '') };
+            }
+
+            // 2. IMAGE GENERATION LAYER
             const isImageRequest = /\b(generate|create|make|banao|bana|show)\b.*\b(image|photo|picture|pic|drawing|image)\b/i.test(lowerQuery);
 
             if (isImageRequest) {
@@ -288,6 +331,7 @@ class SimpleRAG {
                 }
             }
 
+            // 3. RAG LAYER
             const context = await this.search(clientId, userQuery);
 
             // If no relevant context found, provide the specific "not found" message with available topics
@@ -299,31 +343,32 @@ class SimpleRAG {
                     return { text: "Maaf kijiye, abhi is business ki koi jaankari mere paas nahi hai. 🙏" };
                 }
 
-                let response = "Iss topic ke baare mein mere paas abhi jaankari nahi hai. 🙏\n\nAap mujhse in topics ke baare mein puch sakte hain:\n";
-                topics.forEach(t => {
+                let response = "Iss topic ke baare mein mere paas abhi jaankari nahi hai. 🙏\n\nAap mujhse in topics ke baare mein puch sakte hain:\n\n";
+                topics.forEach((t, i) => {
                     const cleanName = t.replace(/\.[^/.]+$/, "").replace(/_/g, " ").replace(/-/g, " ");
-                    response += `• ${cleanName.charAt(0).toUpperCase() + cleanName.slice(1)}\n`;
+                    response += `${i + 1}. ${cleanName.charAt(0).toUpperCase() + cleanName.slice(1)}\n`;
                 });
                 response += "\nKripya inme se kisi topic par sawal puchein! ✨";
                 return { text: response };
             }
 
-            const systemPrompt = `You are a helpful and professional AI assistant for this business. 
-Your goal is to answer customer questions accurately using ONLY the context provided below.
+            const systemPrompt = `You are an expert AI Business Assistant. Your goal is to provide premium, human-like customer support using ONLY the provided BUSINESS CONTEXT.
 
-RULES:
+STRICT INSTRUCTIONS:
 1. ONLY use information from the BUSINESS CONTEXT. 
-2. If the answer is not there, say: "Maaf kijiye, iss topic ke baare mein mere paas info nahi hai. 🙏"
-3. Use the same language as the customer (Hindi/Hinglish/English).
-4. Keep responses concise, friendly, and helpful.
-5. Use bullet points (using simple dashes - or dots •) for lists.
-6. **IMPORTANT**: DO NOT use any Markdown formatting like asterisks (*), underscores (_), or bold tags. Keep text clean and plain.
-7. End with a polite closing or a relevant question to keep the conversation going.
+2. If the answer is not in the context, say: "Maaf kijiye, iss topic ke baare mein mere paas abhi jaankari nahi hai. Kya main kisi aur cheez mein aapki madad kar sakta hoon?"
+3. NEVER hallucinate or use outside knowledge.
+4. LANGUAGE: Always reply in the same language as the customer (Hindi, Hinglish, or English).
+5. NO TECHNICAL JARGON: Never mention "documents", "context", "database", "chunks", "files", or "RAG".
+6. FORMATTING: Use clean, plain text. ABSOLUTELY NO Markdown (no asterisks *, no underscores _, no bold tags).
+7. STRUCTURE: Use short paragraphs and clear numbered lists for multiple points.
+8. TONE: Professional, confident, and helpful. Sound like a high-end human assistant.
+9. WHATSAPP UX: Keep messages concise and easy to read on mobile screens. Use proper line breaks.
 
 BUSINESS CONTEXT:
 ${context}
 
-Strictly follow the context. Do not use outside knowledge.`;
+Strictly follow the context. Do not expose internal logic.`;
 
             const completion = await this.openai.chat.completions.create({
                 model: "gpt-4o-mini",
@@ -334,7 +379,7 @@ Strictly follow the context. Do not use outside knowledge.`;
                 temperature: 0.5
             });
 
-            return { text: completion.choices[0].message.content };
+            return { text: completion.choices[0].message.content.replace(/\*/g, '').trim() };
 
         } catch (err) {
             console.error('[RAG QUERY ERROR]', err);
