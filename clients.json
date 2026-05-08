@@ -1,47 +1,5 @@
 [
   {
-    "name": "Test Business",
-    "email": "test@example.com",
-    "password": "password",
-    "_id": "1777895809521",
-    "status": "approved",
-    "createdAt": "2026-05-04T10:00:00.000Z",
-    "whatsappNumber": "",
-    "apiKey": "",
-    "logoUrl": "",
-    "botEnabled": true,
-    "autoReplyRules": "",
-    "documents": []
-  },
-  {
-    "name": "AI Mall (Yug)",
-    "email": "yug@example.com",
-    "password": "password",
-    "_id": "1777898150351",
-    "status": "approved",
-    "createdAt": "2026-05-04T10:00:00.000Z",
-    "whatsappNumber": "",
-    "apiKey": "",
-    "logoUrl": "",
-    "botEnabled": true,
-    "autoReplyRules": "",
-    "documents": []
-  },
-  {
-    "name": "Abha",
-    "email": "abha@example.com",
-    "password": "password",
-    "_id": "1777897920140",
-    "status": "approved",
-    "createdAt": "2026-05-04T10:00:00.000Z",
-    "whatsappNumber": "",
-    "apiKey": "",
-    "logoUrl": "",
-    "botEnabled": true,
-    "autoReplyRules": "",
-    "documents": []
-  },
-  {
     "createdAt": "2026-05-06T05:26:26.668Z",
     "status": "approved",
     "isAdmin": true,
@@ -55,5 +13,20 @@
     "password": "Admin@24",
     "role": "admin",
     "_id": "1778045186668"
+  },
+  {
+    "createdAt": "2026-05-08T05:40:01.097Z",
+    "status": "approved",
+    "isAdmin": false,
+    "whatsappNumber": "",
+    "apiKey": "",
+    "logoUrl": "",
+    "botEnabled": false,
+    "autoReplyRules": "",
+    "documents": [],
+    "name": "Abha Jatav",
+    "email": "abha@uwo24.com",
+    "password": "123456",
+    "_id": "1778218801097"
   }
 ]

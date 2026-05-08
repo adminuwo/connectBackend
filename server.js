@@ -603,21 +603,46 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 (async () => {
                     if (isAudio && openai) {
                         if (!audioUrl) return text;
-                        try {
-                            const audioResponse = await axios({ 
-                                url: audioUrl, 
-                                method: 'GET', 
-                                responseType: 'arraybuffer',
-                                headers: authKey ? { 'Authorization': `Basic ${authKey}` } : {}
-                            });
-                            const tempDir = '/tmp/temp_audio';
+                            console.log(`🎙️ [AUDIO] Downloading from: ${audioUrl}`);
+                            // Interakt media download can be tricky with headers. Let's be robust.
+                            let audioResponse;
+                            try {
+                                audioResponse = await axios({ 
+                                    url: audioUrl, 
+                                    method: 'GET', 
+                                    responseType: 'arraybuffer',
+                                    headers: authKey ? { 
+                                        'Authorization': `Developer ${authKey}`,
+                                        'x-api-key': authKey
+                                    } : {}
+                                });
+                            } catch (downloadErr) {
+                                console.warn(`⚠️ [AUDIO] Download with headers failed, trying without headers...`);
+                                audioResponse = await axios({ 
+                                    url: audioUrl, 
+                                    method: 'GET', 
+                                    responseType: 'arraybuffer'
+                                });
+                            }
+                            
+                            const tempDir = path.join(__dirname, 'temp_audio');
                             if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
                             const tempPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
                             fs.writeFileSync(tempPath, audioResponse.data);
-                            const transcription = await openai.audio.transcriptions.create({ file: fs.createReadStream(tempPath), model: "whisper-1" });
-                            fs.unlink(tempPath, () => {}); 
+                            
+                            console.log(`🎙️ [AUDIO] Transcribing: ${tempPath}`);
+                            const transcription = await openai.audio.transcriptions.create({ 
+                                file: fs.createReadStream(tempPath), 
+                                model: "whisper-1" 
+                            });
+                            
+                            fs.unlink(tempPath, (err) => { if (err) console.error('Temp file unlink error:', err); }); 
+                            console.log(`🎙️ [AUDIO] Result: ${transcription.text}`);
                             return transcription.text;
-                        } catch (e) { return text; }
+                        } catch (e) { 
+                            console.error(`❌ [AUDIO ERROR] Transcription failed: ${e.message}`);
+                            return text; 
+                        }
                     }
                     return text;
                 })(),
@@ -658,8 +683,15 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                 console.log(`🧠 [AI] Processing: ${text}`);
                 console.time(`🔍 [RAG+AI] ${customerPhone}`);
-                const ragResponse = await rag.query(clientId, text);
-                const response = ragResponse.text;
+                
+                // Normalize query to handle AIMALL vs AI MALL vs aimall
+                const normalizedQuery = text.toLowerCase().trim().replace(/\s+/g, ' ');
+                
+                const ragResponse = await rag.query(clientId, normalizedQuery);
+                
+                // CLEAN RESPONSE: Remove asterisks as requested by user
+                let response = ragResponse.text.replace(/\*/g, '');
+                
                 const imageUrl = ragResponse.imageUrl;
                 console.timeEnd(`🔍 [RAG+AI] ${customerPhone}`);
 

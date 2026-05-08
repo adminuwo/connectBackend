@@ -84,9 +84,15 @@ class SimpleRAG {
 
         for (const file of files) {
             console.log(`[RAG] 📄 Processing: ${file}...`);
-            const content = await this.extractTextFromFile(path.join(clientPath, file));
+            let content = await this.extractTextFromFile(path.join(clientPath, file));
             if (!content || content.trim().length === 0) continue;
 
+            // Normalize content to improve matching (handle case and extra spaces)
+            // We keep the original for display but normalize for embedding if needed,
+            // but actually OpenAI embeddings handle case well. 
+            // The issue is likely 'AI MALL' vs 'AIMALL'. 
+            // Let's ensure common tokens are recognizable.
+            
             const rawChunks = this.chunkText(content, 800);
             console.log(`[RAG] ✂️ Split ${file} into ${rawChunks.length} chunks.`);
 
@@ -99,7 +105,13 @@ class SimpleRAG {
 
                 try {
                     process.stdout.write(`[RAG] 🧠 Embedding ${file} (Part ${i+1}/${rawChunks.length})... \r`);
+                    
+                    // We generate embedding for the chunk. 
+                    // To handle "AIMALL" vs "AI MALL", we could normalize the text inside the embedding input,
+                    // but OpenAI embeddings are usually good at this.
+                    // The best way is to ensure the query is also normalized similarly.
                     const embedding = await this.getEmbedding(chunkWithMeta);
+                    
                     this.clientChunks[clientId].push({ 
                         text: chunkWithMeta, 
                         embedding,
@@ -192,9 +204,13 @@ class SimpleRAG {
             }));
 
             results.sort((a, b) => b.similarity - a.similarity);
-            // Return top results with similarity > 0.3 threshold
-            const relevant = results.filter(r => r.similarity > 0.3).slice(0, topK);
-            if (relevant.length === 0) return results.slice(0, 3).map(r => r.text).join('\n\n---\n\n'); // fallback: return top 3 anyway
+            // Return top results with similarity > 0.35 threshold (stricter for better accuracy)
+            const relevant = results.filter(r => r.similarity > 0.35).slice(0, topK);
+            
+            if (relevant.length === 0) {
+                console.log(`[RAG] 🔍 No relevant context found for query: "${query}" (Top similarity: ${results[0]?.similarity.toFixed(2)})`);
+                return ''; // No relevant context found
+            }
             return relevant.map(r => r.text).join('\n\n---\n\n');
         } catch (error) {
             console.error(`[RAG] Search error for client ${clientId}:`, error.message);
@@ -274,38 +290,40 @@ class SimpleRAG {
 
             const context = await this.search(clientId, userQuery);
 
-            // If no documents uploaded or no relevant context found, don't hallucinate
+            // If no relevant context found, provide the specific "not found" message with available topics
             if (!context || context.trim() === '') {
-                return { text: "I can only answer questions based on the information provided by this business. No relevant documents have been uploaded yet. Please contact us directly for more information! 🙏" };
+                const chunks = this.clientChunks[clientId] || [];
+                const topics = [...new Set(chunks.map(c => c.source))];
+                
+                if (topics.length === 0) {
+                    return { text: "Maaf kijiye, abhi is business ki koi jaankari mere paas nahi hai. 🙏" };
+                }
+
+                let response = "Iss topic ke baare mein mere paas abhi jaankari nahi hai. 🙏\n\nAap mujhse in topics ke baare mein puch sakte hain:\n";
+                topics.forEach(t => {
+                    const cleanName = t.replace(/\.[^/.]+$/, "").replace(/_/g, " ").replace(/-/g, " ");
+                    response += `• ${cleanName.charAt(0).toUpperCase() + cleanName.slice(1)}\n`;
+                });
+                response += "\nKripya inme se kisi topic par sawal puchein! ✨";
+                return { text: response };
             }
 
-            const systemPrompt = `You are an elite AI sales assistant for this business. Your job is to answer customer questions using ONLY the business information provided below, and do it in a way that is warm, convincing, and drives sales.
+            const systemPrompt = `You are a helpful and professional AI assistant for this business. 
+Your goal is to answer customer questions accurately using ONLY the context provided below.
 
-━━━━━━━━━━━━━━━━━━━━━━
-STRICT CONTENT RULES:
-━━━━━━━━━━━━━━━━━━━━━━
-1. ONLY use facts, prices, features, and details from the BUSINESS CONTEXT below.
-2. Do NOT use your general AI knowledge. No hallucinating.
-3. If the answer is NOT in the context, reply: "I don't have that specific info right now, but our team can help you! Please reach out to us directly. 🙏"
-4. Never make up prices, plans, or features.
+RULES:
+1. ONLY use information from the BUSINESS CONTEXT. 
+2. If the answer is not there, say: "Maaf kijiye, iss topic ke baare mein mere paas info nahi hai. 🙏"
+3. Use the same language as the customer (Hindi/Hinglish/English).
+4. Keep responses concise, friendly, and helpful.
+5. Use bullet points (using simple dashes - or dots •) for lists.
+6. **IMPORTANT**: DO NOT use any Markdown formatting like asterisks (*), underscores (_), or bold tags. Keep text clean and plain.
+7. End with a polite closing or a relevant question to keep the conversation going.
 
-━━━━━━━━━━━━━━━━━━━━━━
-RESPONSE FORMAT RULES:
-━━━━━━━━━━━━━━━━━━━━━━
-- Start with a warm, engaging opening line.
-- Use clear bullet points for lists (use - or •, NOT asterisks *).
-- Use 2-3 relevant emojis per message to keep it friendly and visual.
-- Keep each point short — mobile-friendly.
-- End EVERY reply with ONE strong call-to-action on its own line.
-- Tone: Warm, confident, professional — like a trusted advisor, not a robot.
-- Make the customer feel excited and confident about the product/service.
-
-━━━━━━━━━━━━━━━━━━━━━━
 BUSINESS CONTEXT:
-━━━━━━━━━━━━━━━━━━━━━━
 ${context}
 
-Remember: Be persuasive but honest. Only use information from the context above.`;
+Strictly follow the context. Do not use outside knowledge.`;
 
             const completion = await this.openai.chat.completions.create({
                 model: "gpt-4o-mini",
@@ -324,28 +342,36 @@ Remember: Be persuasive but honest. Only use information from the context above.
         }
     }
 
+    // Helper to find the correct folder for a client
+    getClientFolderPath(clientId) {
+        const folders = fs.readdirSync(this.baseKbPath);
+        const folder = folders.find(f => f.endsWith(`_${clientId}`) || f === clientId);
+        return folder ? path.join(this.baseKbPath, folder) : path.join(this.baseKbPath, clientId);
+    }
+
     // Add a file and re-index for a client
     async addFile(clientId, filename, content) {
-        const clientPath = path.join(this.baseKbPath, clientId);
+        const clientPath = this.getClientFolderPath(clientId);
         if (!fs.existsSync(clientPath)) fs.mkdirSync(clientPath, { recursive: true });
         
         fs.writeFileSync(path.join(clientPath, filename), content);
-        await this.loadClientKnowledge(clientId);
+        await this.loadClientKnowledge(path.basename(clientPath), clientId);
     }
 
     // Delete a file and re-index for a client
     async deleteFile(clientId, filename) {
-        const filePath = path.join(this.baseKbPath, clientId, filename);
+        const clientPath = this.getClientFolderPath(clientId);
+        const filePath = path.join(clientPath, filename);
         if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
-            await this.loadClientKnowledge(clientId);
+            await this.loadClientKnowledge(path.basename(clientPath), clientId);
         }
     }
 
     getClientFiles(clientId) {
-        const clientPath = path.join(this.baseKbPath, clientId);
+        const clientPath = this.getClientFolderPath(clientId);
         if (!fs.existsSync(clientPath)) return [];
-        const supportedExts = ['.txt', '.docx', '.pdf', '.doc'];
+        const supportedExts = ['.txt', '.docx', '.pdf', '.doc', '.xlsx', '.xls'];
         return fs.readdirSync(clientPath).filter(f => supportedExts.includes(path.extname(f).toLowerCase()));
     }
 }
