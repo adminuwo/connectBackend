@@ -220,14 +220,16 @@ class SimpleRAG {
 
             results.sort((a, b) => b.similarity - a.similarity);
             
-            // Return top results with similarity > 0.25 threshold (more inclusive for varied documents)
-            // We take top 5 chunks for a broader context window
-            const relevant = results.filter(r => r.similarity > 0.25).slice(0, 5);
+            // Return top results with similarity > 0.20 threshold (standard for variety of docs)
+            // We take top 5 chunks to provide richer context
+            const relevant = results.filter(r => r.similarity > 0.20).slice(0, 5);
             
             if (relevant.length === 0) {
-                console.log(`[RAG] 🔍 No context found for: "${query}" (Best similarity: ${results[0]?.similarity.toFixed(2)})`);
+                console.log(`[RAG] 🔍 SEARCH FAILED for: "${query}" | Best similarity was: ${results[0]?.similarity.toFixed(2)} (Threshold: 0.20)`);
                 return ''; 
             }
+
+            console.log(`[RAG] ✅ SEARCH SUCCESS: Found ${relevant.length} chunks. Best similarity: ${results[0]?.similarity.toFixed(2)}`);
             return relevant.map(r => r.text).join('\n\n---\n\n');
         } catch (error) {
             console.error(`[RAG] Search error for client ${clientId}:`, error.message);
