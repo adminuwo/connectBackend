@@ -603,6 +603,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 (async () => {
                     if (isAudio && openai) {
                         if (!audioUrl) return text;
+                        try {
                             console.log(`🎙️ [AUDIO] Downloading from: ${audioUrl}`);
                             // Interakt media download can be tricky with headers. Let's be robust.
                             let audioResponse;
