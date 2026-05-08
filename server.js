@@ -56,7 +56,10 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_APT_KEY;
 const INTERAKT_KEY = process.env.INTERAKT_API_KEY || process.env.INTERAKT_APT_KEY;
 
 const { OpenAI } = require('openai');
-const openai = OPENAI_KEY ? new OpenAI({ apiKey: OPENAI_KEY }) : null;
+const openai = OPENAI_KEY ? new OpenAI({ 
+    apiKey: OPENAI_KEY,
+    timeout: 30 * 1000 // 30 seconds timeout to prevent hanging
+}) : null;
 
 console.log(`🤖 [AI STATUS] OpenAI Initialized: ${!!openai} (${process.env.OPENAI_API_KEY ? 'Using OPENAI_API_KEY' : (process.env.OPENAI_APT_KEY ? 'Using OPENAI_APT_KEY' : 'KEY MISSING')})`);
 
@@ -580,12 +583,22 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const messageId = message.id || "no-id";
         const lockKey = `${clientId}_${customerPhone}`;
 
-        // Stop retries & duplicates
+        // 1. Duplicate Message Check (by ID)
         if (processedMessageIds.has(messageId)) return res.sendStatus(200);
+        
+        // 2. Concurrency Lock (by Phone)
+        if (inFlightRequests.has(lockKey)) {
+            console.log(`⏳ [LOCK] Skipping concurrent request for ${lockKey}`);
+            return res.sendStatus(200);
+        }
+
+        // Send 200 OK to Interakt immediately
         res.sendStatus(200);
 
         processedMessageIds.add(messageId);
         if (processedMessageIds.size > 2000) processedMessageIds.delete(processedMessageIds.values().next().value);
+
+        inFlightRequests.add(lockKey);
 
         try {
             console.time(`⏱️ [TOTAL TIME] ${customerPhone}`);
@@ -725,6 +738,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             }
         } catch (err) {
             console.error('❌ [WEBHOOK ERROR]', err.message);
+        } finally {
+            inFlightRequests.delete(lockKey);
         }
     } catch (err) {
         console.error('💥 [WEBHOOK CRITICAL ERROR]', err.message);
