@@ -197,7 +197,7 @@ class SimpleRAG {
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    async search(clientId, query, topK = 5) {
+    async search(clientId, query, topK = 10) {
         // Auto-reload from GCS if not in memory (handles Cloud Run restarts)
         if (!this.clientChunks[clientId] || this.clientChunks[clientId].length === 0) {
             console.log(`[RAG] ⚠️ No chunks in memory for ${clientId}. Trying GCS sync...`);
@@ -209,7 +209,10 @@ class SimpleRAG {
         }
 
         const chunks = this.clientChunks[clientId];
-        if (!chunks || chunks.length === 0) return '';
+        if (!chunks || chunks.length === 0) {
+            console.log(`[RAG] ❌ No chunks available for ${clientId}`);
+            return '';
+        }
 
         try {
             const queryEmbedding = await this.getEmbedding(query);
@@ -220,28 +223,28 @@ class SimpleRAG {
 
             results.sort((a, b) => b.similarity - a.similarity);
             
-            // Return top results with similarity > 0.12 threshold (highly inclusive for Hindi/Hinglish)
-            // We take top 8 chunks to cover all possible topics
-            const relevant = results.filter(r => r.similarity > 0.12).slice(0, 8);
+            // HYPER-INCLUSIVE THRESHOLD (0.10) for maximum retrieval
+            const relevant = results.filter(r => r.similarity > 0.10).slice(0, topK);
             
             if (relevant.length === 0) {
-                console.log(`[RAG] 🔍 SEARCH FAILED for: "${query}" | Best similarity was: ${results[0]?.similarity.toFixed(2)} (Threshold: 0.12)`);
+                console.log(`[RAG] 🔍 SEARCH FAILED for: "${query}" | Best similarity: ${results[0]?.similarity.toFixed(2)}`);
                 return ''; 
             }
 
             console.log(`[RAG] ✅ SEARCH SUCCESS: Found ${relevant.length} chunks. Best similarity: ${results[0]?.similarity.toFixed(2)}`);
             return relevant.map(r => r.text).join('\n\n---\n\n');
         } catch (error) {
-            console.error(`[RAG] Search error for client ${clientId}:`, error.message);
+            console.error(`[RAG] Search error:`, error.message);
             return '';
         }
     }
 
     async syncClientFromGCS(clientId) {
         try {
+            console.log(`[RAG] 🔄 Syncing GCS for client: ${clientId}`);
             const files = await gcs.listClientFiles(clientId);
             if (!files || files.length === 0) {
-                console.log(`[RAG] No files found in GCS for client ${clientId}`);
+                console.log(`[RAG] No files in GCS bucket for ${clientId}`);
                 return;
             }
 
@@ -250,16 +253,18 @@ class SimpleRAG {
 
             for (const fileName of files) {
                 const localPath = path.join(clientPath, fileName);
-                if (!fs.existsSync(localPath)) {
+                // Force redownload if file is small (possible corrupt upload) or not exists
+                if (!fs.existsSync(localPath) || fs.statSync(localPath).size < 10) {
                     console.log(`[RAG] 📥 Downloading ${fileName} from GCS...`);
                     await gcs.downloadFromBucket(clientId, fileName, localPath);
                 }
             }
 
+            // FORCE RE-INDEX
             await this.loadClientKnowledge(clientId, clientId);
-            console.log(`[RAG] ✅ GCS sync complete for ${clientId}. ${this.clientChunks[clientId]?.length || 0} chunks loaded.`);
+            console.log(`[RAG] ✨ Client ${clientId} is READY with ${this.clientChunks[clientId]?.length || 0} chunks.`);
         } catch (err) {
-            console.error(`[RAG] syncClientFromGCS error: ${err.message}`);
+            console.error(`[RAG] syncClientFromGCS Error:`, err.message);
         }
     }
 
