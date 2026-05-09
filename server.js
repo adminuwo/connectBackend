@@ -566,13 +566,13 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const client = await Client.findById(clientId);
         if (!client) {
             console.log(`❌ [WEBHOOK] Client ${clientId} not found in DB`);
-            return res.sendStatus(200);
+            return res.status(200).json({ status: 'ok' });
         }
 
         const message = body.data?.message;
         if (!message || body.type !== 'message_received') {
             console.log(`ℹ️ [WEBHOOK] Ignoring event type: ${body.type}`);
-            return res.sendStatus(200);
+            return res.status(200).json({ status: 'ok' });
         }
 
         // 1. Extract and Normalize Data Immediately
@@ -588,16 +588,16 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const lockKey = `${clientId}_${customerPhone}`;
 
         // 1. Duplicate Message Check (by ID)
-        if (processedMessageIds.has(messageId)) return res.sendStatus(200);
+        if (processedMessageIds.has(messageId)) return res.status(200).json({ status: 'ok' });
         
         // 2. Concurrency Lock (by Phone)
         if (inFlightRequests.has(lockKey)) {
             console.log(`⏳ [LOCK] Skipping concurrent request for ${lockKey}`);
-            return res.sendStatus(200);
+            return res.status(200).json({ status: 'ok' });
         }
 
         // Send 200 OK to Interakt immediately
-        res.sendStatus(200);
+        res.status(200).json({ status: 'ok' });
 
         processedMessageIds.add(messageId);
         if (processedMessageIds.size > 2000) processedMessageIds.delete(processedMessageIds.values().next().value);
