@@ -114,7 +114,8 @@ class MockModel {
 
     async findOne(query) {
         const results = await this.find(query);
-        return results[0] || null;
+        const item = results[0] || null;
+        return item ? this.createInstance(item) : null;
     }
 
     async findById(id) {
@@ -207,12 +208,15 @@ class MockModel {
             save: async function() {
                 let dbData = jsonDb.read(fileName);
                 const index = dbData.findIndex(item => item._id === this._id);
+                
+                const savedItem = { ...this };
+                delete savedItem.save; // Clean up the save function
+                
                 if (index !== -1) {
-                    dbData[index] = { ...this };
+                    dbData[index] = savedItem;
                 } else {
-                    dbData.push({ ...this });
+                    dbData.push(savedItem);
                 }
-                delete dbData[dbData.length-1].save; // Clean up the save function
                 jsonDb.write(fileName, dbData);
                 return this;
             }

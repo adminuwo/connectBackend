@@ -432,13 +432,17 @@ app.post('/api/support/send', async (req, res) => {
         if (!ticket) {
             ticket = Ticket.new ? Ticket.new({ clientId, clientName }) : new Ticket({ clientId, clientName });
         }
-        ticket.messages.push({ sender: 'client', text: message });
+        if (!ticket.messages) ticket.messages = [];
+        ticket.messages.push({ sender: 'client', text: message, timestamp: new Date() });
         ticket.lastUpdate = new Date();
         ticket.status = 'open';
         
         await ticket.save();
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { 
+        console.error('❌ [SUPPORT ERROR]:', err);
+        res.status(500).json({ error: err.message }); 
+    }
 });
 
 // --- ADMIN ROUTES ---
@@ -700,7 +704,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory);
                 
                 // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
-                let response = ragResponse.text.replace(/\*/g, '').replace(/_/g, '').replace(/###/g, '').trim();
+                let response = ragResponse.text.trim();
                 const imageUrl = ragResponse.imageUrl;
                 console.timeEnd(`🔍 [RAG+AI] ${customerPhone}`);
 

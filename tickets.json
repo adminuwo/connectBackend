@@ -1,1 +1,21 @@
-[]
+[
+  {
+    "createdAt": "2026-05-09T05:26:33.692Z",
+    "messages": [
+      {
+        "sender": "client",
+        "text": "ghvk"
+      },
+      {
+        "sender": "client",
+        "text": "hyy",
+        "timestamp": "2026-05-09T05:34:11.964Z"
+      }
+    ],
+    "status": "open",
+    "lastUpdate": "2026-05-09T05:34:11.964Z",
+    "clientId": "1778304359871",
+    "clientName": "undefined",
+    "_id": "1778304393692"
+  }
+]

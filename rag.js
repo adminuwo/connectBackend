@@ -365,7 +365,13 @@ class SimpleRAG {
             }
 
             // 4. RAG LAYER
-            const context = await this.search(clientId, standaloneQuery);
+            let context = await this.search(clientId, standaloneQuery);
+            
+            // SECOND CHANCE: If standalone query found nothing, try the original query
+            if (!context && standaloneQuery !== userQuery) {
+                console.log(`🔍 [AI] Standalone query found nothing. Retrying with original: "${userQuery}"`);
+                context = await this.search(clientId, userQuery);
+            }
 
             // If no relevant context found, we still call the LLM to provide a polite "I don't know" in the user's language.
             const systemPrompt = `You are a professional AI Business Assistant. Your goal is to provide high-end, human-like customer support.
@@ -373,10 +379,11 @@ class SimpleRAG {
             STRICT INSTRUCTIONS:
             1. BUSINESS CONTEXT: Use the provided context below to answer the query.
             2. FALLBACK: If the information is NOT in the context, politely inform the user that you don't have those specific details yet. Never make up facts.
-            3. LANGUAGE: Always respond in the SAME LANGUAGE as the user (English, Hindi, or Hinglish).
+            3. LANGUAGE: Always respond in the EXACT SAME LANGUAGE as the user (English, Hindi, or Hinglish). If user asks in Hindi, answer in Hindi.
             4. TONE: Professional, concise, and helpful. Sound like a premium brand representative.
-            5. WHATSAPP OPTIMIZATION: Use short paragraphs and clear lists. No technical jargon.
-            6. FORMATTING: Plain text ONLY. No bold (*) or italics (_).
+            5. EMOJIS: Use relevant emojis (🎨, ✨, ✅, 🚀) to make the conversation engaging and friendly.
+            6. WHATSAPP OPTIMIZATION: Use short paragraphs and clear lists. Use BOLD (*) for headings or key points to improve readability (Alignment).
+            7. FORMATTING: Use *bold* for emphasis. Do NOT use markdown headers (###) or tables.
             
             BUSINESS CONTEXT:
             ${context || "No specific information found in company records."}
@@ -406,7 +413,7 @@ class SimpleRAG {
                 temperature: 0.5
             });
 
-            return { text: completion.choices[0].message.content.replace(/\*/g, '').trim() };
+            return { text: completion.choices[0].message.content.trim() };
 
         } catch (err) {
             console.error('[RAG QUERY ERROR]', err);
