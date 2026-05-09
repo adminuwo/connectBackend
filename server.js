@@ -570,7 +570,10 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         }
 
         const message = body.data?.message;
-        if (!message || body.type !== 'message_received') {
+        const isWorkflowTrigger = body.type === 'message';
+        const isDefaultTrigger = body.type === 'message_received';
+
+        if (!message || (!isWorkflowTrigger && !isDefaultTrigger)) {
             console.log(`ℹ️ [WEBHOOK] Ignoring event type: ${body.type}`);
             return res.status(200).json({ status: 'ok' });
         }
