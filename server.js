@@ -719,7 +719,10 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                 fullPhoneNumber: customerPhone,
                                 type: 'Text',
                                 data: { message: response }
-                            }, { headers: { 'Authorization': `Basic ${authKey}` } });
+                            }, { 
+                                headers: { 'Authorization': `Basic ${authKey}` },
+                                timeout: 60000 // 60 seconds timeout
+                            });
                             console.log(`📝 [TEXT SENT] Successfully sent text to Interakt.`);
                         }
 
@@ -733,7 +736,10 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                     originalUrl: imageUrl,
                                     previewUrl: imageUrl
                                 }
-                            }, { headers: { 'Authorization': `Basic ${authKey}` } });
+                            }, { 
+                                headers: { 'Authorization': `Basic ${authKey}` },
+                                timeout: 60000 // 60 seconds timeout
+                            });
                             console.log(`🖼️ [IMAGE SENT] Successfully sent image to Interakt.`);
                         }
 

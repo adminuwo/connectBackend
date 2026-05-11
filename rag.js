@@ -82,17 +82,14 @@ class SimpleRAG {
 
         console.log(`[RAG] 📂 Client ${clientId}: Found ${files.length} supported files.`);
 
+        const allChunksForClient = [];
+        const chunksToEmbed = [];
+
         for (const file of files) {
             console.log(`[RAG] 📄 Processing: ${file}...`);
             let content = await this.extractTextFromFile(path.join(clientPath, file));
             if (!content || content.trim().length === 0) continue;
 
-            // Normalize content to improve matching (handle case and extra spaces)
-            // We keep the original for display but normalize for embedding if needed,
-            // but actually OpenAI embeddings handle case well. 
-            // The issue is likely 'AI MALL' vs 'AIMALL'. 
-            // Let's ensure common tokens are recognizable.
-            
             const rawChunks = this.chunkText(content, 800);
             console.log(`[RAG] ✂️ Split ${file} into ${rawChunks.length} chunks.`);
 
@@ -100,31 +97,38 @@ class SimpleRAG {
                 let chunk = rawChunks[i].trim();
                 if (!chunk) continue;
                 
-                // Clean file name for metadata (remove numeric prefixes/IDs)
                 const cleanFileName = file.replace(/^\d+[\s_-]*/, '').replace(/\.[^/.]+$/, "").replace(/_/g, " ").replace(/-/g, " ");
-                
-                // Add Source Metadata to the chunk text
                 const chunkWithMeta = `[Source Document: ${cleanFileName}]\n${chunk}`;
-
-                try {
-                    process.stdout.write(`[RAG] 🧠 Embedding ${file} (Part ${i+1}/${rawChunks.length})... \r`);
-                    
-                    // We generate embedding for the chunk. 
-                    // To handle "AIMALL" vs "AI MALL", we could normalize the text inside the embedding input,
-                    // but OpenAI embeddings are usually good at this.
-                    // The best way is to ensure the query is also normalized similarly.
-                    const embedding = await this.getEmbedding(chunkWithMeta);
-                    
-                    this.clientChunks[clientId].push({ 
-                        text: chunkWithMeta, 
-                        embedding,
-                        source: file
-                    });
-                } catch (err) {
-                    console.error(`\n[RAG] ❌ Embedding Error for ${file}:`, err.message);
-                }
+                
+                chunksToEmbed.push({ text: chunkWithMeta, source: file });
             }
         }
+
+        // BATCH EMBEDDING (Up to 100 chunks at a time for speed)
+        const batchSize = 100;
+        for (let i = 0; i < chunksToEmbed.length; i += batchSize) {
+            const batch = chunksToEmbed.slice(i, i + batchSize);
+            console.log(`[RAG] 🧠 Embedding Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(chunksToEmbed.length/batchSize)} (${batch.length} chunks)...`);
+            
+            try {
+                const response = await this.openai.embeddings.create({
+                    model: 'text-embedding-3-small',
+                    input: batch.map(b => b.text)
+                });
+
+                response.data.forEach((item, index) => {
+                    allChunksForClient.push({
+                        text: batch[index].text,
+                        embedding: item.embedding,
+                        source: batch[index].source
+                    });
+                });
+            } catch (err) {
+                console.error(`[RAG] ❌ Batch Embedding Error:`, err.message);
+            }
+        }
+
+        this.clientChunks[clientId] = allChunksForClient;
         console.log(`\n[RAG] ✨ Client ${clientId} is ready with ${this.clientChunks[clientId].length} vector chunks.`);
     }
 
