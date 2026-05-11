@@ -4,21 +4,7 @@ const path = require('path');
 
 let useLocal = process.env.DB_MODE === 'json' || !process.env.MONGODB_URI;
 
-if (!useLocal) {
-    console.log('🔄 [DB] Attempting to connect to MongoDB...');
-    mongoose.connect(process.env.MONGODB_URI, {
-        serverSelectionTimeoutMS: 10000,
-    })
-    .then(() => {
-        console.log('✅ [DB] Connected to MongoDB (Live Mode)');
-    })
-    .catch(err => {
-        console.error('❌ [DB] MongoDB Connection Error:', err.message);
-        console.log('⚠️ [DB] Connection failed. Please check your MongoDB Atlas IP Whitelist (add 0.0.0.0/0).');
-        console.log('🏠 [DB] Falling back to Local Mode (JSON).');
-        useLocal = true;
-    });
-} else {
+// Removed redundant top-level connection. Use connectDB() instead.
     const reason = process.env.DB_MODE === 'json' ? 'DB_MODE=json' : 'MONGODB_URI is missing';
     console.log(`🏠 [DB] Running in Local Mode: Using JSON files for storage (${reason})`);
 }

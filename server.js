@@ -798,21 +798,18 @@ const { connectDB } = require('./database');
 
 (async () => {
     try {
-        // 1. Connect to DB first
+        // 1. Connect to DB
         await connectDB();
         
-        // 2. Start Server
+        // 2. Initial RAG Sync
+        if (openai) {
+            console.log('🔄 [RAG] Pre-loading Knowledge Base...');
+            await syncKnowledgeBase().catch(e => console.error('❌ [RAG ERROR]', e.message));
+        }
+
+        // 3. Start Server
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 [BACKEND READY] Listening on 0.0.0.0:${PORT}`);
-            
-            // 3. Sync RAG in background with a safety delay
-            if (openai) {
-                setTimeout(() => {
-                    syncKnowledgeBase()
-                        .then(() => console.log('✅ [RAG] Knowledge Base Ready.'))
-                        .catch(e => console.error('❌ [RAG ERROR]', e.message));
-                }, 2000);
-            }
         });
     } catch (err) {
         console.error('💥 [CRITICAL STARTUP ERROR]', err.message);
