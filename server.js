@@ -719,7 +719,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                 fullPhoneNumber: customerPhone,
                                 type: 'Text',
                                 data: { message: response }
-                            }, { headers: { 'Authorization': `Developer ${authKey}` } });
+                            }, { headers: { 'Authorization': `Basic ${authKey}` } });
                         }
 
                         // 2. Send Image if generated
@@ -732,7 +732,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                     originalUrl: imageUrl,
                                     previewUrl: imageUrl
                                 }
-                            }, { headers: { 'Authorization': `Developer ${authKey}` } });
+                            }, { headers: { 'Authorization': `Basic ${authKey}` } });
                         }
 
                         // 3. Save everything to DB
