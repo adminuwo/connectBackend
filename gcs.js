@@ -91,7 +91,21 @@ async function deleteFromBucket(clientId, fileName) {
 async function listClientFiles(clientId) {
     if (!bucket) return [];
     try {
-        const [files] = await bucket.getFiles({ prefix: `${clientId}/` });
+        // 1. Try strict ID-only prefix
+        let [files] = await bucket.getFiles({ prefix: `${clientId}/` });
+        
+        // 2. If nothing found, try legacy search (ANY folder that ends with _clientId)
+        if (files.length === 0) {
+            console.log(`[GCS] No files with strict ID prefix. Trying legacy suffix search for: *_${clientId}/`);
+            const [allFiles] = await bucket.getFiles(); // This might be slow if bucket is huge, but necessary for migration
+            files = allFiles.filter(file => {
+                const parts = file.name.split('/');
+                if (parts.length < 2) return false;
+                const folderName = parts[0];
+                return folderName === clientId || folderName.endsWith(`_${clientId}`);
+            });
+        }
+
         return files.map(file => file.name.split('/').pop()).filter(name => name && name !== '.keep');
     } catch (err) {
         console.error(`❌ [GCS] List Error for ${clientId}:`, err.message);
@@ -105,9 +119,29 @@ async function listClientFiles(clientId) {
 async function downloadFromBucket(clientId, fileName, localPath) {
     if (!bucket) return;
     try {
-        const remoteFilePath = `${clientId}/${fileName}`;
         const dir = path.dirname(localPath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        // 1. Try default path (clientId/fileName)
+        let remoteFilePath = `${clientId}/${fileName}`;
+        let [exists] = await bucket.file(remoteFilePath).exists();
+
+        // 2. Fallback: Search for legacy path (Name_ID/fileName)
+        if (!exists) {
+            console.log(`[GCS] File ${fileName} not found at ${remoteFilePath}. Searching for legacy folder...`);
+            const [allFiles] = await bucket.getFiles();
+            const legacyFile = allFiles.find(f => {
+                const parts = f.name.split('/');
+                return parts.length >= 2 && parts[0].endsWith(`_${clientId}`) && parts[1] === fileName;
+            });
+
+            if (legacyFile) {
+                remoteFilePath = legacyFile.name;
+                console.log(`[GCS] Found legacy file: ${remoteFilePath}`);
+            } else {
+                throw new Error(`File ${fileName} not found in any folder for client ${clientId}`);
+            }
+        }
         
         await bucket.file(remoteFilePath).download({ destination: localPath });
         console.log(`📥 [GCS] Downloaded: ${remoteFilePath} -> ${localPath}`);
