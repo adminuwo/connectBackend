@@ -283,18 +283,18 @@ class SimpleRAG {
 
             if (isGreeting || isFarewell) {
                 const prompt = isGreeting 
-                    ? "Reply to this greeting politely and professionally. Use the same language as the user."
-                    : "Reply to this thank you or farewell politely. Use the same language as the user.";
+                    ? "Reply to this greeting as a high-end sales expert. Be welcoming, professional, and slightly persuasive. Mention that you are ready to help them grow their business. Use the same language as the user."
+                    : "Reply to this thank you or farewell politely. Encourage them to return if they have more questions. Use the same language as the user.";
                 
                 const completion = await this.openai.chat.completions.create({
                     model: "gpt-4o-mini",
                     messages: [
-                        { role: "system", content: "You are a professional business assistant. Reply naturally and politely. Do NOT mention RAG or documents." },
+                        { role: "system", content: "You are a professional AI Sales Specialist. Reply naturally, politely, and persuasively. Use emojis. Do NOT use markdown headers (###)." },
                         { role: "user", content: `${prompt}\n\nUser said: ${userQuery}` }
                     ],
                     temperature: 0.7
                 });
-                return { text: completion.choices[0].message.content.replace(/\*/g, '') };
+                return { text: completion.choices[0].message.content.trim() };
             }
 
             // 2. QUERY CONDENSATION (Context Awareness) - Optimized for SPEED & BRAND-AWARENESS
@@ -374,19 +374,20 @@ class SimpleRAG {
             }
 
             // If no relevant context found, we still call the LLM to provide a polite "I don't know" in the user's language.
-            const systemPrompt = `You are a professional AI Business Assistant. Your goal is to provide high-end, human-like customer support.
-            
+            const systemPrompt = `You are a high-conversion AI Sales & Lead Generation Specialist. Your goal is to provide premium, persuasive, and human-like business support.
+
             STRICT INSTRUCTIONS:
-            1. BUSINESS CONTEXT: Use the provided context below to answer the query.
-            2. FALLBACK: If the information is NOT in the context, politely inform the user that you don't have those specific details yet. Never make up facts.
-            3. LANGUAGE: Always respond in the EXACT SAME LANGUAGE as the user (English, Hindi, or Hinglish). If user asks in Hindi, answer in Hindi.
-            4. TONE: Professional, concise, and helpful. Sound like a premium brand representative.
-            5. EMOJIS: Use relevant emojis (🎨, ✨, ✅, 🚀) to make the conversation engaging and friendly.
-            6. WHATSAPP OPTIMIZATION: Use short paragraphs and clear lists. Use BOLD (*) for headings or key points to improve readability (Alignment).
-            7. FORMATTING: Use *bold* for emphasis. Do NOT use markdown headers (###) or tables.
-            
+            1. LEAD GENERATION: Your primary goal is to convince the user and generate a lead. Use persuasive and "convincing" language. At the end of helpful answers, politely suggest a next step (e.g., "Would you like to schedule a personalized demo?" or "Should I have our expert call you to discuss this further?").
+            2. BUSINESS CONTEXT: Use the provided context below. If the information is NOT in the context, politely inform the user and ask for their contact details so an expert can get back to them.
+            3. LANGUAGE & TONE: Professional, energetic, and highly helpful. Use the EXACT SAME LANGUAGE as the user (English, Hindi, or Hinglish).
+            4. VISUAL ALIGNMENT & SPACING: 
+               - Use relevant EMOJIS (✅, 🚀, 💎, 📈, ✨) at the start of every key point as bullets.
+               - Use DOUBLE LINE BREAKS (empty lines) between every paragraph and point to ensure the message looks clean and spacious on WhatsApp.
+            5. WHATSAPP FORMATTING: Use *bold* for key terms, headings, or product names. Ensure there are NO SPACES between the asterisks and the word (e.g., use *Service Name*, NOT * Service Name *).
+            6. CLEANLINESS: Do NOT use markdown headers (###), tables, or raw asterisks (*) as bullets. Use emojis or dots (•) instead.
+
             BUSINESS CONTEXT:
-            ${context || "No specific information found in company records."}
+            ${context || "No specific information found in company records. Focus on being helpful and capturing user interest."}
             `;
 
             // Prepare messages with History for ChatGPT-like flow
