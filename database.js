@@ -5,9 +5,9 @@ const path = require('path');
 let useLocal = process.env.DB_MODE === 'json' || !process.env.MONGODB_URI;
 
 // Removed redundant top-level connection. Use connectDB() instead.
-    const reason = process.env.DB_MODE === 'json' ? 'DB_MODE=json' : 'MONGODB_URI is missing';
-    console.log(`🏠 [DB] Running in Local Mode: Using JSON files for storage (${reason})`);
-}
+
+const reason = process.env.DB_MODE === 'json' ? 'DB_MODE=json' : 'MONGODB_URI is missing';
+console.log(`🏠 [DB] Running in Local Mode: Using JSON files for storage (${reason})`);
 
 // Helper to handle JSON storage
 const jsonDb = {
