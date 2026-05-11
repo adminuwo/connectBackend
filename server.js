@@ -149,7 +149,7 @@ async function syncKnowledgeBase() {
         if (!fs.existsSync(kbRoot)) fs.mkdirSync(kbRoot, { recursive: true });
 
         for (const client of clients) {
-            const clientFolder = client._id || client.id;
+            const clientFolder = (client._id || client.id).toString();
             const clientKbDir = path.join(kbRoot, clientFolder);
             
             if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
@@ -389,7 +389,7 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
 
-        const clientFolder = client._id || client.id;
+        const clientFolder = (client._id || client.id).toString();
         
         // Update DB first for immediate UI feedback
         const docs = (client.documents || []).filter(d => d !== req.params.filename);
