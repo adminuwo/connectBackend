@@ -591,11 +591,14 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const lockKey = `${clientId}_${customerPhone}`;
 
         // 1. Duplicate Message Check (by ID)
-        if (processedMessageIds.has(messageId)) return res.status(200).json({ status: 'ok' });
+        if (processedMessageIds.has(messageId)) {
+            console.log(`🚫 [DUPLICATE] Skipping already processed messageId: ${messageId}`);
+            return res.status(200).json({ status: 'ok' });
+        }
         
         // 2. Concurrency Lock (by Phone)
         if (inFlightRequests.has(lockKey)) {
-            console.log(`⏳ [LOCK] Skipping concurrent request for ${lockKey}`);
+            console.log(`⏳ [LOCK] Skipping concurrent request for ${lockKey} (Still processing previous message)`);
             return res.status(200).json({ status: 'ok' });
         }
 
@@ -676,12 +679,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             // Initialize or update chat object
             let activeChat = chat || new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
             
-            // Fast Echo Check
-            if (activeChat.messages.length > 0) {
-                const lastMsg = activeChat.messages[activeChat.messages.length - 1];
-                if (lastMsg.sender === 'bot' && (text.startsWith(lastMsg.text.substring(0, 20)) || lastMsg.text.startsWith(text.substring(0, 20)))) return;
-            }
-
             activeChat.messages.push({ 
                 sender: 'customer', 
                 text: text || "Audio Message", 
@@ -714,6 +711,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                 if (response || imageUrl) {
                     try {
+                        console.log(`📡 [SENDING] Attempting to send reply to ${customerPhone}...`);
+                        
                         // 1. Send Text Reply
                         if (response) {
                             await axios.post('https://api.interakt.ai/v1/public/message/', {
@@ -721,6 +720,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                 type: 'Text',
                                 data: { message: response }
                             }, { headers: { 'Authorization': `Basic ${authKey}` } });
+                            console.log(`📝 [TEXT SENT] Successfully sent text to Interakt.`);
                         }
 
                         // 2. Send Image if generated
@@ -734,6 +734,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                     previewUrl: imageUrl
                                 }
                             }, { headers: { 'Authorization': `Basic ${authKey}` } });
+                            console.log(`🖼️ [IMAGE SENT] Successfully sent image to Interakt.`);
                         }
 
                         // 3. Save everything to DB
@@ -742,11 +743,14 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
+                        console.log(`💾 [DB SAVE] Chat updated for ${customerPhone}`);
                         
-                        console.log(`✅ [BOT SENT] to ${customerPhone}`);
+                        console.log(`✅ [BOT COMPLETED] Full cycle done for ${customerPhone}`);
                     } catch (apiErr) {
-                        console.error(`❌ [WHATSAPP ERROR]`, apiErr.response?.data || apiErr.message);
+                        console.error(`❌ [WHATSAPP API ERROR]`, apiErr.response?.data || apiErr.message);
                     }
+                } else {
+                    console.log(`⚠️ [EMPTY RESPONSE] AI returned no text or image for ${customerPhone}`);
                 }
                 console.timeEnd(`⏱️ [TOTAL TIME] ${customerPhone}`);
             }
