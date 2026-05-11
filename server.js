@@ -595,10 +595,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             return res.status(200).json({ status: 'ok' });
         }
         
-        // 2. Process message
-        res.status(200).json({ status: 'ok' });
-
-        // Send 200 OK to Interakt immediately
+        // 2. Process message (Send 200 OK to Interakt immediately)
         res.status(200).json({ status: 'ok' });
 
         processedMessageIds.add(messageId);
