@@ -567,11 +567,13 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         }
 
         const message = body.data?.message;
-        const isWorkflowTrigger = body.type === 'message';
-        const isDefaultTrigger = body.type === 'message_received';
+        const eventType = body.type || "unknown";
+        
+        // Support multiple Interakt event types for better compatibility
+        const isValidEvent = ['message', 'message_received', 'message_sent'].includes(eventType);
 
-        if (!message || (!isWorkflowTrigger && !isDefaultTrigger)) {
-            console.log(`ℹ️ [WEBHOOK] Ignoring event type: ${body.type}`);
+        if (!message || !isValidEvent) {
+            console.log(`ℹ️ [WEBHOOK] Ignoring event: ${eventType}`);
             return res.status(200).json({ status: 'ok' });
         }
 
