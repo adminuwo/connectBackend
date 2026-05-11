@@ -689,6 +689,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 mediaUrl: isAudio ? audioUrl : ''
             });
             activeChat.lastUpdate = new Date();
+            await activeChat.save(); // Save immediately so dashboard shows the message
             
             // --- BACKGROUND SAVE + AI PROCESS ---
             if (openai) {
