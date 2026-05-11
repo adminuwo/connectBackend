@@ -712,32 +712,72 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         
                         // 1. Send Text Reply
                         if (response) {
-                            await axios.post('https://api.interakt.ai/v1/public/message/', {
+                            const payload = {
                                 fullPhoneNumber: customerPhone,
                                 type: 'Text',
                                 data: { message: response }
-                            }, { 
-                                headers: { 'Authorization': `Basic ${authKey}` },
-                                timeout: 60000 // 60 seconds timeout
-                            });
+                            };
+                            
+                            const sendWithRetry = async (attempts = 3) => {
+                                for (let i = 0; i < attempts; i++) {
+                                    try {
+                                        const response = await axios.post(
+                                            'https://api.interakt.ai/v1/public/message/',
+                                            payload,
+                                            {
+                                                headers: {
+                                                    'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}`,
+                                                    'Content-Type': 'application/json'
+                                                },
+                                                timeout: 60000 // 60s timeout
+                                            }
+                                        );
+                                        return response;
+                                    } catch (err) {
+                                        const isRetryable = err.code === 'ECONNRESET' || err.message.includes('socket hang up') || err.code === 'ETIMEDOUT';
+                                        if (i === attempts - 1 || !isRetryable) throw err;
+                                        console.log(`⚠️ [RETRYING] Attempt ${i + 2} for ${customerPhone} due to: ${err.message}`);
+                                        await new Promise(r => setTimeout(r, 1000 * (i + 1))); // Exponential backoff
+                                    }
+                                }
+                            };
+
+                            await sendWithRetry();
                             console.log(`📝 [TEXT SENT] Successfully sent text to Interakt.`);
                         }
 
                         // 2. Send Image if generated
                         if (imageUrl) {
-                            await axios.post('https://api.interakt.ai/v1/public/message/', {
+                            const imgPayload = {
                                 fullPhoneNumber: customerPhone,
                                 type: 'Image',
                                 data: {
-                                    title: response || "Generated Image",
-                                    originalUrl: imageUrl,
-                                    previewUrl: imageUrl
+                                    mediaUrl: imageUrl,
+                                    message: response || "Here is your generated image! 🎨"
                                 }
-                            }, { 
-                                headers: { 'Authorization': `Basic ${authKey}` },
-                                timeout: 60000 // 60 seconds timeout
-                            });
-                            console.log(`🖼️ [IMAGE SENT] Successfully sent image to Interakt.`);
+                            };
+                            
+                            const sendImgWithRetry = async (attempts = 2) => {
+                                for (let i = 0; i < attempts; i++) {
+                                    try {
+                                        await axios.post(
+                                            'https://api.interakt.ai/v1/public/message/',
+                                            imgPayload,
+                                            {
+                                                headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` },
+                                                timeout: 60000
+                                            }
+                                        );
+                                        return;
+                                    } catch (err) {
+                                        if (i === attempts - 1) throw err;
+                                        await new Promise(r => setTimeout(r, 2000));
+                                    }
+                                }
+                            };
+
+                            await sendImgWithRetry().catch(e => console.error('❌ [IMAGE SEND ERROR]', e.message));
+                            console.log(`🖼️ [IMAGE SENT] Image successfully sent to ${customerPhone}.`);
                         }
 
                         // 3. Save everything to DB
