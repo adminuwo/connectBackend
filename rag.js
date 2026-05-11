@@ -25,15 +25,10 @@ class SimpleRAG {
         const clientFolders = fs.readdirSync(this.baseKbPath).filter(f => fs.lstatSync(path.join(this.baseKbPath, f)).isDirectory());
         
         for (const folderName of clientFolders) {
-            // Standardize: Extract ID from Name_ID or use folder as ID if no underscore
+            // Standardize: If folder name contains an underscore, the part after the last underscore is the ID.
+            // Otherwise, the entire folder name is the ID.
             const parts = folderName.split('_');
             const clientId = parts[parts.length - 1];
-            
-            // Avoid duplicate loading if we have both 'ID' and 'Name_ID' folders
-            if (folderName === clientId && clientFolders.some(f => f.endsWith(`_${clientId}`) && f !== clientId)) {
-                console.log(`[RAG] 🧹 Skipping redundant ID-only folder: ${folderName}`);
-                continue;
-            }
 
             console.log(`[RAG] 📁 Loading knowledge from: ${folderName} (ID: ${clientId})`);
             await this.loadClientKnowledge(folderName, clientId);

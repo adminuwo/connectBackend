@@ -149,8 +149,7 @@ async function syncKnowledgeBase() {
         if (!fs.existsSync(kbRoot)) fs.mkdirSync(kbRoot, { recursive: true });
 
         for (const client of clients) {
-            const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-            const clientFolder = `${sanitizedName}_${client._id || client.id}`;
+            const clientFolder = client._id || client.id;
             const clientKbDir = path.join(kbRoot, clientFolder);
             
             if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
@@ -215,7 +214,7 @@ app.post('/api/auth/login', async (req, res) => {
         res.json({
             success: true,
             clientId: client._id || client.id,
-            name: client.name,
+            name: client.name || 'Connect User',
             role: client.role || 'client',
             isAdmin: client.role === 'admin'
         });
@@ -310,8 +309,7 @@ app.post('/api/client/:id/upload', upload.array('files'), async (req, res) => {
         const client = await Client.findById(req.params.id);
         const docs = client.documents || [];
         const clientId = req.params.id;
-        const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        const clientFolder = `${sanitizedName}_${clientId}`;
+        const clientFolder = clientId;
         const clientKbDir = path.join(__dirname, 'knowledge_base', clientFolder);
         
         if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
@@ -391,8 +389,7 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
 
-        const sanitizedName = client.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        const clientFolder = `${sanitizedName}_${client._id || client.id}`;
+        const clientFolder = client._id || client.id;
         
         // Update DB first for immediate UI feedback
         const docs = (client.documents || []).filter(d => d !== req.params.filename);
