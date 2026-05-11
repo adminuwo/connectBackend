@@ -593,19 +593,14 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             return res.status(200).json({ status: 'ok' });
         }
         
-        // 2. Concurrency Lock (by Phone)
-        if (inFlightRequests.has(lockKey)) {
-            console.log(`⏳ [LOCK] Skipping concurrent request for ${lockKey} (Still processing previous message)`);
-            return res.status(200).json({ status: 'ok' });
-        }
+        // 2. Process message
+        res.status(200).json({ status: 'ok' });
 
         // Send 200 OK to Interakt immediately
         res.status(200).json({ status: 'ok' });
 
         processedMessageIds.add(messageId);
         if (processedMessageIds.size > 2000) processedMessageIds.delete(processedMessageIds.values().next().value);
-
-        inFlightRequests.add(lockKey);
 
         try {
             console.time(`⏱️ [TOTAL TIME] ${customerPhone}`);
@@ -799,8 +794,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             }
         } catch (err) {
             console.error('❌ [WEBHOOK ERROR]', err.message);
-        } finally {
-            inFlightRequests.delete(lockKey);
         }
     } catch (err) {
         console.error('💥 [WEBHOOK CRITICAL ERROR]', err.message);
