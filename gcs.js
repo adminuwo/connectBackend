@@ -77,9 +77,29 @@ async function uploadToBucket(clientId, fileName, fileContent) {
 async function deleteFromBucket(clientId, fileName) {
     if (!bucket) return;
     try {
-        const destFileName = `${clientId}/${fileName}`;
-        await bucket.file(destFileName).delete();
-        console.log(`🗑️ [GCS] File deleted: ${destFileName}`);
+        // 1. Try strict path
+        const strictPath = `${clientId}/${fileName}`;
+        const [exists] = await bucket.file(strictPath).exists();
+        
+        if (exists) {
+            await bucket.file(strictPath).delete();
+            console.log(`🗑️ [GCS] File deleted (strict): ${strictPath}`);
+            return;
+        }
+
+        // 2. Fallback: Search in legacy folders
+        const [allFiles] = await bucket.getFiles();
+        const targetFile = allFiles.find(f => {
+            const parts = f.name.split('/');
+            return parts.length >= 2 && parts[0].endsWith(`_${clientId}`) && parts[1] === fileName;
+        });
+
+        if (targetFile) {
+            await targetFile.delete();
+            console.log(`🗑️ [GCS] File deleted (legacy): ${targetFile.name}`);
+        } else {
+            console.warn(`⚠️ [GCS] Could not find file ${fileName} to delete for client ${clientId}`);
+        }
     } catch (err) {
         console.error(`❌ [GCS] Delete Error:`, err.message);
     }
@@ -150,12 +170,45 @@ async function downloadFromBucket(clientId, fileName, localPath) {
     }
 }
 
+/**
+ * Gets the public URL for a file, checking both strict and legacy paths
+ */
+async function getPublicUrl(clientId, fileName) {
+    if (!bucket) return null;
+    try {
+        // 1. Try strict path
+        const strictPath = `${clientId}/${fileName}`;
+        const [exists] = await bucket.file(strictPath).exists();
+        if (exists) {
+            return `https://storage.googleapis.com/${bucketName}/${strictPath}`;
+        }
+
+        // 2. Fallback: Search in legacy folders
+        const [allFiles] = await bucket.getFiles();
+        const targetFile = allFiles.find(f => {
+            const parts = f.name.split('/');
+            return parts.length >= 2 && parts[0].endsWith(`_${clientId}`) && parts[1] === fileName;
+        });
+
+        if (targetFile) {
+            return `https://storage.googleapis.com/${bucketName}/${targetFile.name}`;
+        }
+
+        return null;
+    } catch (err) {
+        console.error(`❌ [GCS] getPublicUrl Error:`, err.message);
+        return null;
+    }
+}
+
 module.exports = {
     storage,
     bucket,
+    bucketName,
     uploadToBucket,
     deleteFromBucket,
     listClientFiles,
     downloadFromBucket,
+    getPublicUrl,
     isGcsActive: !!bucket
 };

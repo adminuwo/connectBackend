@@ -85,7 +85,7 @@ class SimpleRAG {
             let content = await this.extractTextFromFile(path.join(clientPath, file));
             if (!content || content.trim().length === 0) continue;
 
-            const rawChunks = this.chunkText(content, 800);
+            const rawChunks = this.chunkText(content, 1500);
             console.log(`[RAG] ✂️ Split ${file} into ${rawChunks.length} chunks.`);
 
             for (let i = 0; i < rawChunks.length; i++) {
@@ -196,7 +196,7 @@ class SimpleRAG {
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    async search(clientId, query, topK = 10) {
+    async search(clientId, query, topK = 15) {
         // Auto-reload from GCS if not in memory (handles Cloud Run restarts)
         if (!this.clientChunks[clientId] || this.clientChunks[clientId].length === 0) {
             console.log(`[RAG] ⚠️ No chunks in memory for ${clientId}. Trying GCS sync...`);
@@ -209,28 +209,35 @@ class SimpleRAG {
 
         const chunks = this.clientChunks[clientId];
         if (!chunks || chunks.length === 0) {
-            console.log(`[RAG] ❌ No chunks available for ${clientId}`);
+            console.log(`[RAG] ❌ No chunks available for ${clientId} after sync attempt.`);
             return '';
         }
 
         try {
+            console.log(`[RAG] 🔍 Searching for: "${query}" across ${chunks.length} chunks...`);
             const queryEmbedding = await this.getEmbedding(query);
             const results = chunks.map(chunk => ({
                 text: chunk.text,
-                similarity: this.cosineSimilarity(queryEmbedding, chunk.embedding)
+                similarity: this.cosineSimilarity(queryEmbedding, chunk.embedding),
+                source: chunk.source
             }));
 
             results.sort((a, b) => b.similarity - a.similarity);
             
-            // HYPER-INCLUSIVE THRESHOLD (0.10) for maximum retrieval
-            const relevant = results.filter(r => r.similarity > 0.10).slice(0, topK);
+            // Log top 3 similarities for debugging
+            results.slice(0, 3).forEach((r, i) => {
+                console.log(`   Rank ${i+1}: [Sim: ${r.similarity.toFixed(4)}] Source: ${r.source}`);
+            });
+
+            // Even more inclusive threshold for maximum retrieval
+            const relevant = results.filter(r => r.similarity > 0.05).slice(0, topK);
             
             if (relevant.length === 0) {
-                console.log(`[RAG] 🔍 SEARCH FAILED for: "${query}" | Best similarity: ${results[0]?.similarity.toFixed(2)}`);
+                console.log(`[RAG] 🔍 SEARCH FAILED: No chunks above threshold. Best: ${results[0]?.similarity.toFixed(4)}`);
                 return ''; 
             }
 
-            console.log(`[RAG] ✅ SEARCH SUCCESS: Found ${relevant.length} chunks. Best similarity: ${results[0]?.similarity.toFixed(2)}`);
+            console.log(`[RAG] ✅ SEARCH SUCCESS: Found ${relevant.length} chunks.`);
             return relevant.map(r => r.text).join('\n\n---\n\n');
         } catch (error) {
             console.error(`[RAG] Search error:`, error.message);
@@ -247,27 +254,28 @@ class SimpleRAG {
                 return;
             }
 
-            const clientPath = path.join(this.baseKbPath, clientId);
+            // Use the consistent folder path logic
+            const clientPath = this.getClientFolderPath(clientId);
             if (!fs.existsSync(clientPath)) fs.mkdirSync(clientPath, { recursive: true });
 
             for (const fileName of files) {
                 const localPath = path.join(clientPath, fileName);
-                // Force redownload if file is small (possible corrupt upload) or not exists
                 if (!fs.existsSync(localPath) || fs.statSync(localPath).size < 10) {
                     console.log(`[RAG] 📥 Downloading ${fileName} from GCS...`);
                     await gcs.downloadFromBucket(clientId, fileName, localPath);
                 }
             }
 
-            // FORCE RE-INDEX
-            await this.loadClientKnowledge(clientId, clientId);
+            // FORCE RE-INDEX using the folder name only
+            const folderName = path.basename(clientPath);
+            await this.loadClientKnowledge(folderName, clientId);
             console.log(`[RAG] ✨ Client ${clientId} is READY with ${this.clientChunks[clientId]?.length || 0} chunks.`);
         } catch (err) {
             console.error(`[RAG] syncClientFromGCS Error:`, err.message);
         }
     }
 
-    async query(clientId, userQuery, chatHistory = []) {
+    async query(clientId, userQuery, chatHistory = [], clientName = "AISA Connect") {
         if (!this.openai) return { text: "I'm sorry, my AI features are currently offline." };
         
         try {
@@ -282,16 +290,16 @@ class SimpleRAG {
 
             if (isGreeting || isFarewell) {
                 const prompt = isGreeting 
-                    ? "Reply to this greeting as a high-end sales expert for AISA Connect. Be welcoming, professional, and mention you are here to assist with information from our business documents. Use the same language as the user."
-                    : "Reply to this thank you or farewell politely. Encourage them to return if they have more questions. Use the same language as the user.";
+                    ? `Greet the user warmly as a representative of ${clientName}. Mention that you can answer any business-related questions using our official documents. Use the same language as the user.`
+                    : "Politely say goodbye or you're welcome. Encourage them to ask any other business questions. Use the same language as the user.";
                 
                 const completion = await this.openai.chat.completions.create({
                     model: "gpt-4o-mini",
                     messages: [
-                        { role: "system", content: "You are a professional AI Sales Specialist for AISA Connect. Reply naturally and politely. Use emojis. Do NOT use markdown headers (###)." },
+                        { role: "system", content: `You are a professional AI Assistant for ${clientName}. Stay polite and brief. Use emojis. Do NOT use markdown headers (###).` },
                         { role: "user", content: `${prompt}\n\nUser said: ${userQuery}` }
                     ],
-                    temperature: 0.5
+                    temperature: 0.3
                 });
                 return { text: completion.choices[0].message.content.trim() };
             }
@@ -309,7 +317,7 @@ class SimpleRAG {
                     messages: [
                         { 
                             role: "system", 
-                            content: "You are an expert query optimizer. Convert the user's latest message into a STANDALONE search query. If a specific brand or topic was discussed previously (e.g. Aimall, AISA, Legal AI), ensure it is included in the new query to avoid ambiguity. Extract only core keywords. Return ONLY the query." 
+                            content: `You are an expert query optimizer. Convert the user's latest message into a STANDALONE search query. If a specific topic was discussed previously (e.g. pricing, features, company info), ensure it is included in the new query to avoid ambiguity. Extract only core keywords. Return ONLY the query.` 
                         },
                         { role: "user", content: `HISTORY:\n${historyText}\n\nNEW MESSAGE: ${userQuery}` }
                     ],
@@ -373,18 +381,20 @@ class SimpleRAG {
             }
 
             const systemPrompt = `
-You are the Elite AI Sales Specialist for AISA Connect.
-Your primary mission: Provide accurate information based ONLY on the provided business documents.
+You are the Official AI Knowledge Assistant for ${clientName}.
+Your ONLY source of information is the provided business context.
 
-STRICT INSTRUCTIONS:
-1. STRICT ADHERENCE: Use the provided context to answer questions. If the information is NOT in the context, politely state: "I'm sorry, I don't have information about that in my current records. Would you like to speak with a human representative?" or something similar in the user's language.
-2. DO NOT USE GENERAL KNOWLEDGE: Never answer questions about topics not covered in the documents (e.g., general world knowledge, other companies, personal advice).
-3. HUMAN-LIKE PERSUASION: Talk like a top-tier sales executive. Be professional and warm. Use the customer's language (Hindi/English).
-4. LEAD GENERATION: If the customer shows interest in what is in the documents, naturally ask for their requirements or business name.
-5. FORMATTING: Use professional emojis (📈, 🤝, 💼, 📞, 🌟, ✅, 🚀). Use plain text only. NO markdown (no #, no *).
+STRICT GROUNDING RULES:
+1. USE ONLY PROVIDED CONTEXT: Your answer MUST be derived directly from the business documents below.
+2. ABSOLUTELY NO GENERAL KNOWLEDGE: If the answer is not explicitly in the context, say: "I'm sorry, I don't have that specific information in my official documents. Please contact our support team for more details."
+3. BE PRECISE & LITERAL: Do not hallucinate, imagine, or add details from your own training data.
+4. SALES TONE: While being strict about facts, remain professional, warm, and helpful. Use the user's language (Hindi/English).
+5. FORMATTING: Use emojis (📈, 🤝, 💼, ✅, 🚀) for readability. NO markdown (no #, no *).
 
-Context from our business documents:
-${contextText || "NO INFORMATION FOUND IN DOCUMENTS. Tell the user you don't have this specific information and offer human support."}
+Context from official business documents:
+--------------------------------------------------
+${contextText || "CRITICAL: NO RELEVANT DOCUMENTS FOUND. Inform the user that you don't have information on this topic in your records."}
+--------------------------------------------------
 `;
 
             // Prepare messages with History for ChatGPT-like flow

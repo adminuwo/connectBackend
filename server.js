@@ -276,11 +276,16 @@ app.get('/api/client/:id', async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
-        res.json({
+        
+        // Return client data plus GCS config for frontend preview construction
+        const responseData = {
             ...client.toObject ? client.toObject() : client,
             id: client._id || client.id,
-            documentCount: (client.documents || []).length
-        });
+            documentCount: (client.documents || []).length,
+            gcsBucket: process.env.GCP_BUCKET_NAME,
+            gcsActive: gcs.isGcsActive
+        };
+        res.json(responseData);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -384,6 +389,49 @@ app.delete('/api/client/:id/chats/:phone', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Get the public GCS URL for document preview (used by Google Docs Viewer)
+app.get('/api/client/:id/documents/:filename/preview-url', async (req, res) => {
+    try {
+        const client = await Client.findById(req.params.id);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+        
+        const clientFolder = (client._id || client.id).toString();
+        
+        if (gcs.isGcsActive) {
+            const publicUrl = await gcs.getPublicUrl(clientFolder, req.params.filename);
+            if (publicUrl) {
+                return res.json({ url: publicUrl });
+            }
+        }
+        
+        // No GCS URL available
+        res.json({ url: null });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/client/:id/documents/:filename', async (req, res) => {
+    try {
+        const client = await Client.findById(req.params.id);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+        
+        const clientFolder = (client._id || client.id).toString();
+        const filePath = path.join(__dirname, 'knowledge_base', clientFolder, req.params.filename);
+        
+        if (fs.existsSync(filePath)) {
+            res.sendFile(filePath);
+        } else if (gcs.isGcsActive) {
+            const publicUrl = await gcs.getPublicUrl(clientFolder, req.params.filename);
+            if (publicUrl) {
+                res.redirect(publicUrl);
+            } else {
+                res.status(404).json({ error: 'File not found in storage' });
+            }
+        } else {
+            res.status(404).json({ error: 'File not found' });
+        }
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/client/:id/documents/:filename', async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
@@ -412,6 +460,51 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
     } catch (err) { 
         console.error('❌ [DELETE DOC CRITICAL ERROR]', err.message);
         res.status(500).json({ error: err.message }); 
+    }
+});
+
+// Delete ALL documents for a client
+app.delete('/api/client/:id/documents', async (req, res) => {
+    try {
+        const client = await Client.findById(req.params.id);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+
+        const clientFolder = (client._id || client.id).toString();
+        
+        // Update DB to empty list
+        await Client.findByIdAndUpdate(req.params.id, { documents: [] });
+
+        // Cleanup in background
+        (async () => {
+            try {
+                // Delete local files
+                const localFolderPath = path.join(__dirname, 'knowledge_base', clientFolder);
+                if (fs.existsSync(localFolderPath)) {
+                    const files = fs.readdirSync(localFolderPath);
+                    for (const file of files) {
+                        fs.unlinkSync(path.join(localFolderPath, file));
+                    }
+                }
+
+                // Delete from GCS
+                if (gcs.isGcsActive) {
+                    const files = await gcs.listClientFiles(clientFolder);
+                    for (const filename of files) {
+                        await gcs.deleteFromBucket(clientFolder, filename);
+                    }
+                }
+
+                if (openai) await rag.init();
+                console.log(`🗑️ [DELETE ALL] Successfully cleared Knowledge Base for client ${client.name}`);
+            } catch (bgErr) {
+                console.error('⚠️ [DELETE ALL BG ERROR]', bgErr.message);
+            }
+        })();
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('❌ [DELETE ALL CRITICAL ERROR]', err.message);
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -693,7 +786,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     text: m.text
                 }));
 
-                const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory);
+                const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory, client.name);
                 
                 // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
                 let response = ragResponse.text.trim();
