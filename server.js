@@ -674,6 +674,13 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         let text = (message.text || message.message || "").trim();
         const msgType = message.type || "Text";
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
+        
+        // Skip dummy template data from Interakt
+        if (text.includes('{{') || rawPhone.includes('{{')) {
+            console.log(`⚠️ [WEBHOOK] Ignoring dummy template message for client ${clientId}`);
+            return res.status(200).json({ status: 'ok' });
+        }
+
         let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
         if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
         if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
