@@ -1,1 +1,25 @@
-[]
+[
+  {
+    "createdAt": "2026-05-13T08:20:51.655Z",
+    "messages": [
+      {
+        "sender": "workflow",
+        "text": "talk to bot",
+        "msgType": "text",
+        "timestamp": "2026-05-13T08:20:51.655Z"
+      },
+      {
+        "sender": "customer",
+        "text": "Hello, please help me",
+        "msgType": "text",
+        "mediaUrl": ""
+      }
+    ],
+    "status": "open",
+    "lastUpdate": "2026-05-13T08:31:42.902Z",
+    "botPaused": false,
+    "clientId": "1778218801097",
+    "customerPhone": "+918359890909",
+    "_id": "1778660451655"
+  }
+]

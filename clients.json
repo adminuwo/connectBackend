@@ -18,10 +18,10 @@
     "createdAt": "2026-05-08T05:40:01.097Z",
     "status": "approved",
     "isAdmin": false,
-    "whatsappNumber": "",
+    "whatsappNumber": "+918359890909",
     "apiKey": "",
     "logoUrl": "",
-    "botEnabled": false,
+    "botEnabled": true,
     "autoReplyRules": "",
     "documents": [],
     "name": "Abha Jatav",
@@ -29,6 +29,7 @@
     "password": "123456",
     "_id": "1778218801097"
   },
+ 
   {
     "createdAt": "2026-05-09T05:25:59.871Z",
     "status": "approved",

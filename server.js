@@ -731,27 +731,41 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         if (isSentByBot) {
             const sentText = (message.text || message.message || "").trim();
             if (sentText) {
-                // Persistent Save to DB
+                console.log(`📝 [TRACKING] Sent by Workflow/Admin: "${sentText.substring(0, 30)}..."`);
+                
+                // Track in DB
                 try {
                     const chat = await Chat.findOne({ clientId, customerPhone });
                     let activeChat = chat || new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
-                    activeChat.messages.push({
-                        sender: 'workflow',
-                        text: sentText,
+                    activeChat.messages.push({ 
+                        sender: 'workflow', 
+                        text: sentText, 
                         msgType: 'text',
-                        timestamp: new Date()
+                        timestamp: new Date() 
                     });
                     activeChat.lastUpdate = new Date();
                     await activeChat.save();
-                    console.log(`💾 [DB TRACK] Workflow message saved for ${customerPhone}`);
                 } catch (dbErr) {
                     console.error('❌ [DB TRACK ERROR]', dbErr.message);
                 }
-
-                // In-memory fallback for immediate speed
+                
+                // In-memory fallback
                 lastBotMessages.set(key, { text: sentText, source: 'workflow', time: Date.now() });
+
+                // CHECK: Is this a handover message?
+                const isHandoverTrigger = sentText.toLowerCase().includes('bot') || 
+                                          sentText.toLowerCase().includes('assistant') ||
+                                          sentText.toLowerCase().includes('help');
+
+                if (isHandoverTrigger) {
+                    console.log(`🚀 [HANDOVER DETECTED] Workflow sent a trigger. Triggering AI reply...`);
+                    // Proceed to AI logic below
+                } else {
+                    return res.status(200).json({ status: 'ok' });
+                }
+            } else {
+                return res.status(200).json({ status: 'ok' });
             }
-            return res.status(200).json({ status: 'ok' });
         }
 
         // 2. If it's an incoming message, we check the logic gate
@@ -822,6 +836,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     return;
                 }
                 console.log(`🚀 [GATE] Handover detected. AI taking over.`);
+                // console.log("the bot is taking over : ", clientId)
+                // res.status(200).json({ status: 'ok',clientId,task:"taking over" });
             }
 
             const authKey = client.apiKey || INTERAKT_KEY;
@@ -926,12 +942,12 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                 if (response || imageUrl) {
                     try {
-                        console.log(`📡 [SENDING] Attempting to send reply to ${customerPhone}...`);
+                        console.log(`📡 [SENDING] Processing AI response for ${customerPhone}...`);
 
                         // 1. Send Text Reply
                         if (response) {
                             const payload = {
-                                fullPhoneNumber: customerPhone,
+                                fullPhoneNumber: customerPhone.replace('+', ''), 
                                 type: 'Text',
                                 data: { message: response }
                             };
@@ -939,7 +955,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                             const sendWithRetry = async (attempts = 3) => {
                                 for (let i = 0; i < attempts; i++) {
                                     try {
-                                        const response = await axios.post(
+                                        console.log(`📤 [INTERAKT] Sending text to ${payload.fullPhoneNumber}...`);
+                                        await axios.post(
                                             'https://api.interakt.ai/v1/public/message/',
                                             payload,
                                             {
@@ -947,27 +964,26 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                                     'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}`,
                                                     'Content-Type': 'application/json'
                                                 },
-                                                timeout: 60000 // 60s timeout
+                                                timeout: 60000 
                                             }
                                         );
-                                        return response;
+                                        console.log(`✅ [INTERAKT SUCCESS] Text sent to ${customerPhone}`);
+                                        return;
                                     } catch (err) {
+                                        console.error(`⚠️ [INTERAKT ERROR] Text Attempt ${i+1}:`, err.response?.data || err.message);
                                         const isRetryable = err.code === 'ECONNRESET' || err.message.includes('socket hang up') || err.code === 'ETIMEDOUT';
                                         if (i === attempts - 1 || !isRetryable) throw err;
-                                        console.log(`⚠️ [RETRYING] Attempt ${i + 2} for ${customerPhone} due to: ${err.message}`);
-                                        await new Promise(r => setTimeout(r, 1000 * (i + 1))); // Exponential backoff
+                                        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
                                     }
                                 }
                             };
-
                             await sendWithRetry();
-                            console.log(`📝 [TEXT SENT] Successfully sent text to Interakt.`);
                         }
 
                         // 2. Send Image if generated
                         if (imageUrl) {
                             const imgPayload = {
-                                fullPhoneNumber: customerPhone,
+                                fullPhoneNumber: customerPhone.replace('+', ''),
                                 type: 'Image',
                                 data: {
                                     mediaUrl: imageUrl,
@@ -978,6 +994,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                             const sendImgWithRetry = async (attempts = 2) => {
                                 for (let i = 0; i < attempts; i++) {
                                     try {
+                                        console.log(`📤 [INTERAKT] Sending image to ${imgPayload.fullPhoneNumber}...`);
                                         await axios.post(
                                             'https://api.interakt.ai/v1/public/message/',
                                             imgPayload,
@@ -986,29 +1003,28 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                                 timeout: 60000
                                             }
                                         );
+                                        console.log(`✅ [INTERAKT SUCCESS] Image sent to ${customerPhone}`);
                                         return;
                                     } catch (err) {
+                                        console.error(`⚠️ [INTERAKT ERROR] Image Attempt ${i+1}:`, err.response?.data || err.message);
                                         if (i === attempts - 1) throw err;
                                         await new Promise(r => setTimeout(r, 2000));
                                     }
                                 }
                             };
-
                             await sendImgWithRetry().catch(e => console.error('❌ [IMAGE SEND ERROR]', e.message));
-                            console.log(`🖼️ [IMAGE SENT] Image successfully sent to ${customerPhone}.`);
                         }
 
                         // 3. Save everything to DB and update state
                         if (response) activeChat.messages.push({ sender: 'bot', text: response, msgType: 'text' });
                         if (imageUrl) activeChat.messages.push({ sender: 'bot', text: 'Generated Image', msgType: 'image', mediaUrl: imageUrl });
-
-                        // IMPORTANT: Mark the state as 'ai' so the next message is automatically handled
+                        
+                        // Mark the state as 'ai'
                         lastBotMessages.set(key, { text: response || "Image", source: 'ai', time: Date.now() });
 
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
                         console.log(`💾 [DB SAVE] Chat updated for ${customerPhone}`);
-
                         console.log(`✅ [BOT COMPLETED] Full cycle done for ${customerPhone}`);
                     } catch (apiErr) {
                         console.error(`❌ [WHATSAPP API ERROR]`, apiErr.response?.data || apiErr.message);
