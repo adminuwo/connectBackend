@@ -986,6 +986,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                         // 1. Send Text Reply
                         if (response) {
+                            if (!customerPhone || customerPhone.length < 7) {
+                                console.error(`❌ [SEND ERROR] Invalid phone number: ${customerPhone}. Skipping API call.`);
+                                return;
+                            }
+
                             const payload = {
                                 fullPhoneNumber: customerPhone.replace('+', ''), 
                                 type: 'Text',
