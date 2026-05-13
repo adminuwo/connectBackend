@@ -19,7 +19,7 @@ const transporter = nodemailer.createTransport({
 const lastBotMessages = new Map();
 const processedMessageIds = new Set(); // To prevent processing retried webhooks
 const inFlightRequests = new Set(); // To prevent concurrent processing for same phone
- // clientId_phone -> lastMessageText
+// clientId_phone -> lastMessageText
 
 // Configure storage for uploads
 const storage = multer.diskStorage({
@@ -56,7 +56,7 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_APT_KEY;
 const INTERAKT_KEY = process.env.INTERAKT_API_KEY || process.env.INTERAKT_APT_KEY;
 
 const { OpenAI } = require('openai');
-const openai = OPENAI_KEY ? new OpenAI({ 
+const openai = OPENAI_KEY ? new OpenAI({
     apiKey: OPENAI_KEY,
     timeout: 30 * 1000 // 30 seconds timeout to prevent hanging
 }) : null;
@@ -151,7 +151,7 @@ async function syncKnowledgeBase() {
         for (const client of clients) {
             const clientFolder = (client._id || client.id).toString();
             const clientKbDir = path.join(kbRoot, clientFolder);
-            
+
             if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
 
             if (gcs.isGcsActive) {
@@ -242,9 +242,9 @@ app.post('/api/auth/send-otp', async (req, res) => {
         await transporter.sendMail(mailOptions);
         console.log(`✅ [OTP] Sent to ${email}: ${otp}`);
         res.json({ success: true, message: 'OTP sent to your email.' });
-    } catch (err) { 
+    } catch (err) {
         console.error('❌ [OTP ERROR]', err.message);
-        res.status(500).json({ error: 'Failed to send OTP email.' }); 
+        res.status(500).json({ error: 'Failed to send OTP email.' });
     }
 });
 
@@ -276,7 +276,7 @@ app.get('/api/client/:id', async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
-        
+
         // Return client data plus GCS config for frontend preview construction
         const responseData = {
             ...client.toObject ? client.toObject() : client,
@@ -316,7 +316,7 @@ app.post('/api/client/:id/upload', upload.array('files'), async (req, res) => {
         const clientId = req.params.id;
         const clientFolder = clientId;
         const clientKbDir = path.join(__dirname, 'knowledge_base', clientFolder);
-        
+
         if (!fs.existsSync(clientKbDir)) fs.mkdirSync(clientKbDir, { recursive: true });
 
         for (const file of req.files) {
@@ -394,16 +394,16 @@ app.get('/api/client/:id/documents/:filename/preview-url', async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
-        
+
         const clientFolder = (client._id || client.id).toString();
-        
+
         if (gcs.isGcsActive) {
             const publicUrl = await gcs.getPublicUrl(clientFolder, req.params.filename);
             if (publicUrl) {
                 return res.json({ url: publicUrl });
             }
         }
-        
+
         // No GCS URL available
         res.json({ url: null });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -413,10 +413,10 @@ app.get('/api/client/:id/documents/:filename', async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
-        
+
         const clientFolder = (client._id || client.id).toString();
         const filePath = path.join(__dirname, 'knowledge_base', clientFolder, req.params.filename);
-        
+
         if (fs.existsSync(filePath)) {
             res.sendFile(filePath);
         } else if (gcs.isGcsActive) {
@@ -438,7 +438,7 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
         if (!client) return res.status(404).json({ error: 'Client not found' });
 
         const clientFolder = (client._id || client.id).toString();
-        
+
         // Update DB first for immediate UI feedback
         const docs = (client.documents || []).filter(d => d !== req.params.filename);
         await Client.findByIdAndUpdate(req.params.id, { documents: docs });
@@ -457,9 +457,9 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
         })();
 
         res.json({ success: true });
-    } catch (err) { 
+    } catch (err) {
         console.error('❌ [DELETE DOC CRITICAL ERROR]', err.message);
-        res.status(500).json({ error: err.message }); 
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -470,7 +470,7 @@ app.delete('/api/client/:id/documents', async (req, res) => {
         if (!client) return res.status(404).json({ error: 'Client not found' });
 
         const clientFolder = (client._id || client.id).toString();
-        
+
         // Update DB to empty list
         await Client.findByIdAndUpdate(req.params.id, { documents: [] });
 
@@ -526,12 +526,12 @@ app.post('/api/support/send', async (req, res) => {
         ticket.messages.push({ sender: 'client', text: message, timestamp: new Date() });
         ticket.lastUpdate = new Date();
         ticket.status = 'open';
-        
+
         await ticket.save();
         res.json({ success: true });
-    } catch (err) { 
+    } catch (err) {
         console.error('❌ [SUPPORT ERROR]:', err);
-        res.status(500).json({ error: err.message }); 
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -542,10 +542,10 @@ app.post('/api/admin/clients/create', async (req, res) => {
         const existing = await Client.findOne({ email });
         if (existing) return res.status(400).json({ error: 'Email already exists' });
 
-        const clientData = { 
-            name, 
-            email, 
-            password, 
+        const clientData = {
+            name,
+            email,
+            password,
             status: 'approved' // Admin created clients are pre-approved
         };
 
@@ -568,7 +568,7 @@ app.get('/api/admin/clients', async (req, res) => {
             const isAdm = u.role === 'admin' || u.isAdmin === true || u.email === 'admin@uwo24.com';
             return !isAdm;
         });
-        
+
         res.json(clients.map(c => ({
             ...c.toObject ? c.toObject() : c,
             id: c._id || c.id,
@@ -617,17 +617,17 @@ app.post('/api/admin/support/reply', async (req, res) => {
 app.get('/api/admin/stats', async (req, res) => {
     try {
         let allUsers = await Client.find({});
-        
+
         // Strictly filter out anyone who is an admin
         const clients = allUsers.filter(u => {
             const email = (u.email || "").toLowerCase().trim();
             const role = (u.role || "").toLowerCase().trim();
             const isAdmin = u.isAdmin === true || u.isAdmin === "true";
-            
+
             const isAdm = role === 'admin' || isAdmin || email === 'admin@uwo24.com';
             return !isAdm;
         });
-        
+
         const approved = clients.filter(c => (c.status || "").toLowerCase() === 'approved');
         const pending = clients.filter(c => (c.status || "").toLowerCase() === 'pending');
         const totalDocs = clients.reduce((acc, c) => acc + (c.documents || []).length, 0);
@@ -640,9 +640,9 @@ app.get('/api/admin/stats', async (req, res) => {
             approvedClients: approved.length,
             totalDocs: totalDocs
         });
-    } catch (err) { 
+    } catch (err) {
         console.error('Stats Error:', err.message);
-        res.status(500).json({ error: 'Failed to load stats' }); 
+        res.status(500).json({ error: 'Failed to load stats' });
     }
 });
 
@@ -650,18 +650,18 @@ app.get('/api/admin/stats', async (req, res) => {
 app.all('/api/client/:clientId/bot/:action', async (req, res) => {
     const { clientId, action } = req.params;
     const isEnable = ['on', 'enable', 'start', 'true', '1'].includes(action.toLowerCase());
-    
+
     console.log(`🔌 [REMOTE CONTROL] Request to turn bot ${isEnable ? 'ON' : 'OFF'} for client ${clientId}`);
-    
+
     try {
         const client = await Client.findById(clientId);
         if (!client) return res.status(404).json({ error: 'Client not found' });
-        
+
         await Client.findByIdAndUpdate(clientId, { botEnabled: isEnable });
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             botEnabled: isEnable,
-            message: `Bot successfully turned ${isEnable ? 'ON' : 'OFF'}` 
+            message: `Bot successfully turned ${isEnable ? 'ON' : 'OFF'}`
         });
     } catch (err) {
         console.error('❌ [REMOTE CONTROL ERROR]', err.message);
@@ -673,7 +673,7 @@ app.all('/api/client/:clientId/bot/:action', async (req, res) => {
 app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
     const { clientId, phone, action } = req.params;
     const isBotActive = ['on', 'enable', 'start', 'true', 'resume'].includes(action.toLowerCase());
-    
+
     // Normalize phone
     let customerPhone = phone.replace(/\D/g, '');
     if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
@@ -687,10 +687,10 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
             { botPaused: !isBotActive },
             { upsert: true }
         );
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             botActive: isBotActive,
-            message: `Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}` 
+            message: `Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}`
         });
     } catch (err) {
         console.error('❌ [HANDOVER ERROR]', err.message);
@@ -715,16 +715,16 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const eventType = body.type || "unknown";
         let text = "";
         let msgType = "Text";
-        
+
         // --- LOGIC GATE: Workflow Tracking ---
         const isSentByBot = message.is_sent_by_me || eventType === 'message_sent' || eventType === 'message_received' === false;
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
-        
+
         // Normalize Phone
         let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
         if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
         if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
-        
+
         const key = `${clientId}_${customerPhone}`;
 
         // 1. If it's an outgoing message (Sent by Workflow or Admin), track it
@@ -735,11 +735,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 try {
                     const chat = await Chat.findOne({ clientId, customerPhone });
                     let activeChat = chat || new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
-                    activeChat.messages.push({ 
-                        sender: 'workflow', 
-                        text: sentText, 
+                    activeChat.messages.push({
+                        sender: 'workflow',
+                        text: sentText,
                         msgType: 'text',
-                        timestamp: new Date() 
+                        timestamp: new Date()
                     });
                     activeChat.lastUpdate = new Date();
                     await activeChat.save();
@@ -747,7 +747,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 } catch (dbErr) {
                     console.error('❌ [DB TRACK ERROR]', dbErr.message);
                 }
-                
+
                 // In-memory fallback for immediate speed
                 lastBotMessages.set(key, { text: sentText, source: 'workflow', time: Date.now() });
             }
@@ -763,7 +763,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         // 1. Extract Data
         text = (message.text || message.message || "").trim();
         msgType = message.type || "Text";
-        
+
         // Skip dummy template data from Interakt
         if (text.includes('{{') || rawPhone.includes('{{')) {
             console.log(`⚠️ [WEBHOOK] Ignoring dummy template message for client ${clientId}`);
@@ -779,7 +779,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             console.log(`🚫 [DUPLICATE] Skipping already processed messageId: ${messageId}`);
             return res.status(200).json({ status: 'ok' });
         }
-        
+
         // 2. Process message (Send 200 OK to Interakt immediately)
         res.status(200).json({ status: 'ok' });
 
@@ -788,13 +788,13 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
         try {
             console.time(`⏱️ [TOTAL TIME] ${customerPhone}`);
-            
+
             // --- THE LOGIC GATE CHECK ---
             if (!client.botEnabled) return;
 
             // Load Chat to check persistence state if memory is empty
             let activeChat = await Chat.findOne({ clientId, customerPhone });
-            
+
             let state = lastBotMessages.get(key);
             if (!state && activeChat && activeChat.messages.length > 0) {
                 const lastMsg = activeChat.messages[activeChat.messages.length - 1];
@@ -803,20 +803,20 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             const lastMsgText = state ? state.text : "";
             const lastMsgSource = state ? state.source : "unknown";
-            
+
             console.log(`🤖 [GATE] Last: "${lastMsgText.substring(0, 30)}..." | Source: ${lastMsgSource}`);
-            
+
             // LOGIC: 
             // 1. If AI already took over (source === 'ai' or 'bot'), always respond.
             // 2. If it's a workflow (source === 'workflow'), only respond if it's a handover message.
             if (lastMsgSource === 'workflow') {
-                const isHandover = !lastMsgText.trim().endsWith('?') || 
-                                 lastMsgText.toLowerCase().includes('help') || 
-                                 lastMsgText.toLowerCase().includes('assistant') ||
-                                 lastMsgText.toLowerCase().includes('bot') ||
-                                 lastMsgText.toLowerCase().includes('ask') ||
-                                 lastMsgText.length > 100;
-                                 
+                const isHandover = !lastMsgText.trim().endsWith('?') ||
+                    lastMsgText.toLowerCase().includes('help') ||
+                    lastMsgText.toLowerCase().includes('assistant') ||
+                    lastMsgText.toLowerCase().includes('Bot') ||
+                    lastMsgText.toLowerCase().includes('ask') ||
+                    lastMsgText.length > 100;
+
                 if (!isHandover) {
                     console.log(`⏳ [GATE] Workflow active. Bot staying silent.`);
                     return;
@@ -825,7 +825,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             }
 
             const authKey = client.apiKey || INTERAKT_KEY;
-            
+
             // Robust Audio Detection (Used for both Whisper and DB Save)
             const lowType = msgType.toLowerCase();
             const isAudio = lowType.includes('audio') || lowType.includes('voice') || !!message.audio;
@@ -841,41 +841,41 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                             // Interakt media download can be tricky with headers. Let's be robust.
                             let audioResponse;
                             try {
-                                audioResponse = await axios({ 
-                                    url: audioUrl, 
-                                    method: 'GET', 
+                                audioResponse = await axios({
+                                    url: audioUrl,
+                                    method: 'GET',
                                     responseType: 'arraybuffer',
-                                    headers: authKey ? { 
+                                    headers: authKey ? {
                                         'Authorization': `Developer ${authKey}`,
                                         'x-api-key': authKey
                                     } : {}
                                 });
                             } catch (downloadErr) {
                                 console.warn(`⚠️ [AUDIO] Download with headers failed, trying without headers...`);
-                                audioResponse = await axios({ 
-                                    url: audioUrl, 
-                                    method: 'GET', 
+                                audioResponse = await axios({
+                                    url: audioUrl,
+                                    method: 'GET',
                                     responseType: 'arraybuffer'
                                 });
                             }
-                            
+
                             const tempDir = path.join(__dirname, 'temp_audio');
                             if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
                             const tempPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
                             fs.writeFileSync(tempPath, audioResponse.data);
-                            
+
                             console.log(`🎙️ [AUDIO] Transcribing: ${tempPath}`);
-                            const transcription = await openai.audio.transcriptions.create({ 
-                                file: fs.createReadStream(tempPath), 
-                                model: "whisper-1" 
+                            const transcription = await openai.audio.transcriptions.create({
+                                file: fs.createReadStream(tempPath),
+                                model: "whisper-1"
                             });
-                            
-                            fs.unlink(tempPath, (err) => { if (err) console.error('Temp file unlink error:', err); }); 
+
+                            fs.unlink(tempPath, (err) => { if (err) console.error('Temp file unlink error:', err); });
                             console.log(`🎙️ [AUDIO] Result: ${transcription.text}`);
                             return transcription.text;
-                        } catch (e) { 
+                        } catch (e) {
                             console.error(`❌ [AUDIO ERROR] Transcription failed: ${e.message}`);
-                            return text; 
+                            return text;
                         }
                     }
                     return text;
@@ -893,24 +893,24 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             // Use the already loaded activeChat
             if (!activeChat) activeChat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
-            
-            activeChat.messages.push({ 
-                sender: 'customer', 
-                text: text || "Audio Message", 
+
+            activeChat.messages.push({
+                sender: 'customer',
+                text: text || "Audio Message",
                 msgType: isAudio ? 'audio' : 'text',
                 mediaUrl: isAudio ? audioUrl : ''
             });
             activeChat.lastUpdate = new Date();
             await activeChat.save(); // Save immediately so dashboard shows the message
-            
+
             // --- BACKGROUND SAVE + AI PROCESS ---
             if (openai) {
                 console.log(`🧠 [AI] Processing: ${text}`);
                 console.time(`🔍 [RAG+AI] ${customerPhone}`);
-                
+
                 // Normalize query
                 const normalizedQuery = text.toLowerCase().trim().replace(/\s+/g, ' ');
-                
+
                 // Get last 5 messages for context awareness
                 const chatHistory = activeChat.messages.slice(-5).map(m => ({
                     sender: m.sender,
@@ -918,7 +918,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 }));
 
                 const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory, client.name);
-                
+
                 // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
                 let response = ragResponse.text.trim();
                 const imageUrl = ragResponse.imageUrl;
@@ -927,7 +927,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 if (response || imageUrl) {
                     try {
                         console.log(`📡 [SENDING] Attempting to send reply to ${customerPhone}...`);
-                        
+
                         // 1. Send Text Reply
                         if (response) {
                             const payload = {
@@ -935,7 +935,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                 type: 'Text',
                                 data: { message: response }
                             };
-                            
+
                             const sendWithRetry = async (attempts = 3) => {
                                 for (let i = 0; i < attempts; i++) {
                                     try {
@@ -974,7 +974,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                     message: response || "Here is your generated image! 🎨"
                                 }
                             };
-                            
+
                             const sendImgWithRetry = async (attempts = 2) => {
                                 for (let i = 0; i < attempts; i++) {
                                     try {
@@ -1001,14 +1001,14 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         // 3. Save everything to DB and update state
                         if (response) activeChat.messages.push({ sender: 'bot', text: response, msgType: 'text' });
                         if (imageUrl) activeChat.messages.push({ sender: 'bot', text: 'Generated Image', msgType: 'image', mediaUrl: imageUrl });
-                        
+
                         // IMPORTANT: Mark the state as 'ai' so the next message is automatically handled
                         lastBotMessages.set(key, { text: response || "Image", source: 'ai', time: Date.now() });
 
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
                         console.log(`💾 [DB SAVE] Chat updated for ${customerPhone}`);
-                        
+
                         console.log(`✅ [BOT COMPLETED] Full cycle done for ${customerPhone}`);
                     } catch (apiErr) {
                         console.error(`❌ [WHATSAPP API ERROR]`, apiErr.response?.data || apiErr.message);
@@ -1059,7 +1059,7 @@ const { connectDB } = require('./database');
     try {
         // 1. Connect to DB
         await connectDB();
-        
+
         // 2. Initial RAG Sync
         if (openai) {
             console.log('🔄 [RAG] Pre-loading Knowledge Base...');
