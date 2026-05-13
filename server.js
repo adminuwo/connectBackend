@@ -819,9 +819,14 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             return res.status(200).json({ status: 'ok' });
         }
 
-        // 1. Extract Data
+        // Extract Data
         text = (message.text || message.message || "").trim();
         msgType = message.type || "Text";
+
+        // Check if variables are not replaced (Interakt Test Mode)
+        if (rawPhone.includes('{{') || text.includes('{{')) {
+            console.warn(`⚠️ [INTERAKT TEST] Detected unreplaced variables (${rawPhone}). Please test with a REAL WhatsApp message, not the "Test" button.`);
+        }
 
         // --- ASYNC PROCESSING ---
         const messageId = message.id || "no-id";
