@@ -673,24 +673,60 @@ app.all('/api/client/:clientId/bot/:action', async (req, res) => {
 app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
     const { clientId, phone, action } = req.params;
     const isBotActive = ['on', 'enable', 'start', 'true', 'resume'].includes(action.toLowerCase());
-
+    
     // Normalize phone
     let customerPhone = phone.replace(/\D/g, '');
     if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
     if (!customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
 
-    console.log(`🤝 [HANDOVER] Request to ${isBotActive ? 'ENABLE' : 'PAUSE'} bot for ${customerPhone} (Client: ${clientId})`);
-
     try {
+        const client = await Client.findById(clientId);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+
         await Chat.findOneAndUpdate(
             { clientId, customerPhone },
             { botPaused: !isBotActive },
             { upsert: true }
         );
-        res.json({
-            success: true,
+        console.log(`🤝 [HANDOVER] Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}`);
+
+        // If activating, send an immediate "Welcome/Assistant" message
+        if (isBotActive && openai) {
+            (async () => {
+                try {
+                    const chat = await Chat.findOne({ clientId, customerPhone });
+                    const chatHistory = chat ? chat.messages.slice(-5).map(m => ({ sender: m.sender, text: m.text })) : [];
+                    
+                    // Trigger RAG with a "handover" context
+                    const ragResponse = await rag.query(clientId, "The customer has just handed over control to you. Greet them and ask how you can help.", chatHistory, client.name);
+                    
+                    if (ragResponse.text) {
+                        await axios.post(
+                            'https://api.interakt.ai/v1/public/message/',
+                            {
+                                fullPhoneNumber: customerPhone.replace('+', ''),
+                                type: 'Text',
+                                data: { message: ragResponse.text.trim() }
+                            },
+                            {
+                                headers: {
+                                    'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}`,
+                                    'Content-Type': 'application/json'
+                                }
+                            }
+                        );
+                        console.log(`✅ [HANDOVER REPLY] Sent welcome message to ${customerPhone}`);
+                    }
+                } catch (err) {
+                    console.error('❌ [HANDOVER AI ERROR]', err.message);
+                }
+            })();
+        }
+
+        res.json({ 
+            success: true, 
             botActive: isBotActive,
-            message: `Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}`
+            message: `Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}` 
         });
     } catch (err) {
         console.error('❌ [HANDOVER ERROR]', err.message);
@@ -824,20 +860,21 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             // 1. If AI already took over (source === 'ai' or 'bot'), always respond.
             // 2. If it's a workflow (source === 'workflow'), only respond if it's a handover message.
             if (lastMsgSource === 'workflow') {
-                const isHandover = !lastMsgText.trim().endsWith('?') ||
-                    lastMsgText.toLowerCase().includes('help') ||
-                    lastMsgText.toLowerCase().includes('assistant') ||
-                    lastMsgText.toLowerCase().includes('Bot') ||
-                    lastMsgText.toLowerCase().includes('ask') ||
-                    lastMsgText.length > 100;
+                const currentText = text.toLowerCase();
+                const isHandover = !lastMsgText.trim().endsWith('?') || 
+                                 lastMsgText.toLowerCase().includes('help') || 
+                                 lastMsgText.toLowerCase().includes('assistant') ||
+                                 lastMsgText.toLowerCase().includes('bot') ||
+                                 lastMsgText.toLowerCase().includes('ask') ||
+                                 lastMsgText.length > 100 ||
+                                 currentText.includes('bot') || 
+                                 currentText.includes('assistant');
 
                 if (!isHandover) {
                     console.log(`⏳ [GATE] Workflow active. Bot staying silent.`);
                     return;
                 }
-                console.log(`🚀 [GATE] Handover detected. AI taking over.`);
-                // console.log("the bot is taking over : ", clientId)
-                // res.status(200).json({ status: 'ok',clientId,task:"taking over" });
+                console.log(`🚀 [GATE] Handover detected (Current or Last). AI taking over.`);
             }
 
             const authKey = client.apiKey || INTERAKT_KEY;
