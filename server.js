@@ -813,6 +813,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 const isHandover = !lastMsgText.trim().endsWith('?') || 
                                  lastMsgText.toLowerCase().includes('help') || 
                                  lastMsgText.toLowerCase().includes('assistant') ||
+                                 lastMsgText.toLowerCase().includes('bot') ||
+                                 lastMsgText.toLowerCase().includes('ask') ||
                                  lastMsgText.length > 100;
                                  
                 if (!isHandover) {
