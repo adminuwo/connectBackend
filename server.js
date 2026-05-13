@@ -674,10 +674,14 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
     const { clientId, phone, action } = req.params;
     const isBotActive = ['on', 'enable', 'start', 'true', 'resume'].includes(action.toLowerCase());
     
-    // Normalize phone
-    let customerPhone = (phone || "").replace(/\D/g, '');
+    // Normalize phone (Check URL params first, then Body)
+    const rawPhone = phone || req.body.phone_number || req.body.phone || req.body.customer_number || "";
+    let customerPhone = rawPhone.replace(/\D/g, '');
+    
     if (!customerPhone) {
-        console.error(`❌ [HANDOVER ERROR] Phone number is missing in the request! URL was: /handover/${phone}/${action}`);
+        // Log the full request for debugging
+        console.error(`❌ [HANDOVER ERROR] No phone number found in URL or Body!`);
+        console.log('📦 [DEBUG] Request Body:', JSON.stringify(req.body));
         return res.status(400).json({ error: 'Phone number is required' });
     }
     
@@ -818,12 +822,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         // 1. Extract Data
         text = (message.text || message.message || "").trim();
         msgType = message.type || "Text";
-
-        // Skip dummy template data from Interakt
-        if (text.includes('{{') || rawPhone.includes('{{')) {
-            console.log(`⚠️ [WEBHOOK] Ignoring dummy template message for client ${clientId}`);
-            return res.status(200).json({ status: 'ok' });
-        }
 
         // --- ASYNC PROCESSING ---
         const messageId = message.id || "no-id";
