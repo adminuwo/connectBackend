@@ -824,16 +824,16 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         msgType = message.type || "Text";
 
         // Check if variables are not replaced (Interakt Test Mode)
-        if (rawPhone.includes('{{') || text.includes('{{')) {
-            console.warn(`⚠️ [INTERAKT TEST] Detected unreplaced variables (${rawPhone}). Please test with a REAL WhatsApp message, not the "Test" button.`);
+        if ((rawPhone && rawPhone.includes('{{')) || (text && text.includes('{{'))) {
+            console.warn(`⚠️ [INTERAKT TEST] Detected unreplaced variables. Please test with a REAL WhatsApp message, not the "Test" button.`);
         }
 
         // --- ASYNC PROCESSING ---
         const messageId = message.id || "no-id";
         const lockKey = `${clientId}_${customerPhone}`;
 
-        // 1. Duplicate Message Check (by ID)
-        if (processedMessageIds.has(messageId)) {
+        // 1. Duplicate Message Check (by ID) - Skip check if ID is "no-id"
+        if (messageId !== "no-id" && processedMessageIds.has(messageId)) {
             console.log(`🚫 [DUPLICATE] Skipping already processed messageId: ${messageId}`);
             return res.status(200).json({ status: 'ok' });
         }
