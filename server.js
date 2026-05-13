@@ -675,7 +675,12 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
     const isBotActive = ['on', 'enable', 'start', 'true', 'resume'].includes(action.toLowerCase());
     
     // Normalize phone
-    let customerPhone = phone.replace(/\D/g, '');
+    let customerPhone = (phone || "").replace(/\D/g, '');
+    if (!customerPhone) {
+        console.error(`❌ [HANDOVER ERROR] Phone number is missing in the request! URL was: /handover/${phone}/${action}`);
+        return res.status(400).json({ error: 'Phone number is required' });
+    }
+    
     if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
     if (!customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
 
