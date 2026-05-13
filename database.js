@@ -67,7 +67,8 @@ const ChatSchema = new mongoose.Schema({
         mediaUrl: { type: String, default: '' },
         timestamp: { type: Date, default: Date.now } 
     }],
-    lastUpdate: { type: Date, default: Date.now }
+    lastUpdate: { type: Date, default: Date.now },
+    botPaused: { type: Boolean, default: false }
 });
 
 const OTPSchema = new mongoose.Schema({
@@ -184,7 +185,7 @@ class MockModel {
         if (modelName === 'Client') {
             defaults = { ...defaults, status: 'pending', isAdmin: false, whatsappNumber: '', apiKey: '', logoUrl: '', botEnabled: false, autoReplyRules: '', documents: [] };
         } else if (modelName === 'Ticket' || modelName === 'Chat') {
-            defaults = { ...defaults, messages: [], status: 'open', lastUpdate: Date.now() };
+            defaults = { ...defaults, messages: [], status: 'open', lastUpdate: Date.now(), botPaused: false };
         }
 
         return {

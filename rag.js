@@ -290,16 +290,16 @@ class SimpleRAG {
 
             if (isGreeting || isFarewell) {
                 const prompt = isGreeting 
-                    ? `Greet the user warmly as a representative of ${clientName}. Mention that you can answer any business-related questions using our official documents. Use the same language as the user.`
-                    : "Politely say goodbye or you're welcome. Encourage them to ask any other business questions. Use the same language as the user.";
+                    ? `Greet the user warmly as a senior professional representative of ${clientName}. Mention that you are their dedicated AI Assistant and can help with any business inquiries using official records. Tone: Professional & Welcoming.`
+                    : "Politely say goodbye or you're welcome. Encourage them to reach out again if they need further assistance. Tone: Professional & Courteous.";
                 
                 const completion = await this.openai.chat.completions.create({
                     model: "gpt-4o-mini",
                     messages: [
-                        { role: "system", content: `You are a professional AI Assistant for ${clientName}. Stay polite and brief. Use emojis. Do NOT use markdown headers (###).` },
+                        { role: "system", content: `You are a high-level Professional AI Business Assistant for ${clientName}. Use a sophisticated yet friendly tone. Use 1-2 relevant emojis. Respond in the same language/style as the user (English, Hindi, or Hinglish). Do NOT use markdown headers (###).` },
                         { role: "user", content: `${prompt}\n\nUser said: ${userQuery}` }
                     ],
-                    temperature: 0.3
+                    temperature: 0.4
                 });
                 return { text: completion.choices[0].message.content.trim() };
             }
@@ -322,7 +322,7 @@ class SimpleRAG {
                         { role: "user", content: `HISTORY:\n${historyText}\n\nNEW MESSAGE: ${userQuery}` }
                     ],
                     temperature: 0,
-                    max_tokens: 30
+                    max_tokens: 40
                 });
                 standaloneQuery = condensation.choices[0].message.content.trim();
                 console.log(`🧠 [AI] Brand-Aware Query: "${standaloneQuery}"`);
@@ -363,7 +363,7 @@ class SimpleRAG {
                     const fileName = `generated_${Date.now()}.png`;
                     const publicUrl = await gcs.uploadToBucket(`generated_images/${clientId}`, fileName, imageBuffer);
                     return { 
-                        text: "Here is the image I generated for you using Gemini! 🎨✨", 
+                        text: "Here is the image I generated for you! 🎨✨", 
                         imageUrl: publicUrl 
                     };
                 } else {
@@ -381,15 +381,17 @@ class SimpleRAG {
             }
 
             const systemPrompt = `
-You are the Official AI Knowledge Assistant for ${clientName}.
-Your ONLY source of information is the provided business context.
+You are the Official AI Knowledge Assistant for ${clientName}. Your goal is to provide highly professional, convincing, and accurate information based ONLY on official documents.
 
-STRICT GROUNDING RULES:
-1. USE ONLY PROVIDED CONTEXT: Your answer MUST be derived directly from the business documents below.
-2. ABSOLUTELY NO GENERAL KNOWLEDGE: If the answer is not explicitly in the context, say: "I'm sorry, I don't have that specific information in my official documents. Please contact our support team for more details."
-3. BE PRECISE & LITERAL: Do not hallucinate, imagine, or add details from your own training data.
-4. SALES TONE: While being strict about facts, remain professional, warm, and helpful. Use the user's language (Hindi/English).
-5. FORMATTING: Use emojis (📈, 🤝, 💼, ✅, 🚀) for readability. NO markdown (no #, no *).
+STRICT OPERATIONAL GUIDELINES:
+1. DOCUMENT-BASED ANSWERS: Your response must be derived 100% from the context below. If the information is missing, politely inform the user that it's not in the official records.
+2. CONVINCING & PERSUASIVE: Use a confident, senior-level professional tone. Speak like an expert who knows the business inside out.
+3. LANGUAGE & STYLE: Respond in the language used by the user (English, Hindi, or Hinglish). Maintain a consistent professional flow.
+4. FORMATTING: 
+   - Use subtle emojis (📈, ✅, 🤝, 🚀, 💼) to make the text readable and modern.
+   - Keep paragraphs short and crisp.
+   - NO markdown symbols like # or *. Keep it clean for WhatsApp.
+5. NO HALLUCINATIONS: Do not guess. If a price or detail isn't in the context, do not make it up.
 
 Context from official business documents:
 --------------------------------------------------
@@ -418,7 +420,7 @@ ${contextText || "CRITICAL: NO RELEVANT DOCUMENTS FOUND. Inform the user that yo
             const completion = await this.openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: messages,
-                temperature: 0.5
+                temperature: 0.4
             });
 
             let finalResponse = completion.choices[0].message.content.trim();

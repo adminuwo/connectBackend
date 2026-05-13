@@ -646,6 +646,58 @@ app.get('/api/admin/stats', async (req, res) => {
     }
 });
 
+// --- REMOTE BOT CONTROL (For Interakt Workflows) ---
+app.all('/api/client/:clientId/bot/:action', async (req, res) => {
+    const { clientId, action } = req.params;
+    const isEnable = ['on', 'enable', 'start', 'true', '1'].includes(action.toLowerCase());
+    
+    console.log(`🔌 [REMOTE CONTROL] Request to turn bot ${isEnable ? 'ON' : 'OFF'} for client ${clientId}`);
+    
+    try {
+        const client = await Client.findById(clientId);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+        
+        await Client.findByIdAndUpdate(clientId, { botEnabled: isEnable });
+        res.json({ 
+            success: true, 
+            botEnabled: isEnable,
+            message: `Bot successfully turned ${isEnable ? 'ON' : 'OFF'}` 
+        });
+    } catch (err) {
+        console.error('❌ [REMOTE CONTROL ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- HANDOVER CONTROL (For Specific Conversations) ---
+app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
+    const { clientId, phone, action } = req.params;
+    const isBotActive = ['on', 'enable', 'start', 'true', 'resume'].includes(action.toLowerCase());
+    
+    // Normalize phone
+    let customerPhone = phone.replace(/\D/g, '');
+    if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
+    if (!customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
+
+    console.log(`🤝 [HANDOVER] Request to ${isBotActive ? 'ENABLE' : 'PAUSE'} bot for ${customerPhone} (Client: ${clientId})`);
+
+    try {
+        await Chat.findOneAndUpdate(
+            { clientId, customerPhone },
+            { botPaused: !isBotActive },
+            { upsert: true }
+        );
+        res.json({ 
+            success: true, 
+            botActive: isBotActive,
+            message: `Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}` 
+        });
+    } catch (err) {
+        console.error('❌ [HANDOVER ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- WEBHOOK FOR INTERAKT ---
 app.post('/webhook/interakt/:clientId', async (req, res) => {
     const { clientId } = req.params;
@@ -661,29 +713,62 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
         const message = body.data?.message;
         const eventType = body.type || "unknown";
+        let text = "";
+        let msgType = "Text";
         
-        // Support multiple Interakt event types for better compatibility
-        const isValidEvent = ['message', 'message_received', 'message_sent'].includes(eventType);
+        // --- LOGIC GATE: Workflow Tracking ---
+        const isSentByBot = message.is_sent_by_me || eventType === 'message_sent' || eventType === 'message_received' === false;
+        const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
+        
+        // Normalize Phone
+        let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
+        if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
+        if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
+        
+        const key = `${clientId}_${customerPhone}`;
 
-        if (!message || !isValidEvent) {
-            console.log(`ℹ️ [WEBHOOK] Ignoring event: ${eventType}`);
+        // 1. If it's an outgoing message (Sent by Workflow or Admin), track it
+        if (isSentByBot) {
+            const sentText = (message.text || message.message || "").trim();
+            if (sentText) {
+                // Persistent Save to DB
+                try {
+                    const chat = await Chat.findOne({ clientId, customerPhone });
+                    let activeChat = chat || new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
+                    activeChat.messages.push({ 
+                        sender: 'workflow', 
+                        text: sentText, 
+                        msgType: 'text',
+                        timestamp: new Date() 
+                    });
+                    activeChat.lastUpdate = new Date();
+                    await activeChat.save();
+                    console.log(`💾 [DB TRACK] Workflow message saved for ${customerPhone}`);
+                } catch (dbErr) {
+                    console.error('❌ [DB TRACK ERROR]', dbErr.message);
+                }
+                
+                // In-memory fallback for immediate speed
+                lastBotMessages.set(key, { text: sentText, source: 'workflow', time: Date.now() });
+            }
             return res.status(200).json({ status: 'ok' });
         }
 
-        // 1. Extract and Normalize Data Immediately
-        let text = (message.text || message.message || "").trim();
-        const msgType = message.type || "Text";
-        const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
+        // 2. If it's an incoming message, we check the logic gate
+        if (!message || (eventType !== 'message_received' && eventType !== 'message')) {
+            console.log(`ℹ️ [WEBHOOK] Ignoring non-message event: ${eventType}`);
+            return res.status(200).json({ status: 'ok' });
+        }
+
+        // 1. Extract Data
+        text = (message.text || message.message || "").trim();
+        msgType = message.type || "Text";
         
         // Skip dummy template data from Interakt
         if (text.includes('{{') || rawPhone.includes('{{')) {
             console.log(`⚠️ [WEBHOOK] Ignoring dummy template message for client ${clientId}`);
             return res.status(200).json({ status: 'ok' });
         }
-
-        let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
-        if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
-        if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
 
         // --- ASYNC PROCESSING ---
         const messageId = message.id || "no-id";
@@ -703,7 +788,39 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
         try {
             console.time(`⏱️ [TOTAL TIME] ${customerPhone}`);
+            
+            // --- THE LOGIC GATE CHECK ---
             if (!client.botEnabled) return;
+
+            // Load Chat to check persistence state if memory is empty
+            let activeChat = await Chat.findOne({ clientId, customerPhone });
+            
+            let state = lastBotMessages.get(key);
+            if (!state && activeChat && activeChat.messages.length > 0) {
+                const lastMsg = activeChat.messages[activeChat.messages.length - 1];
+                state = { text: lastMsg.text, source: lastMsg.sender === 'customer' ? 'unknown' : lastMsg.sender };
+            }
+
+            const lastMsgText = state ? state.text : "";
+            const lastMsgSource = state ? state.source : "unknown";
+            
+            console.log(`🤖 [GATE] Last: "${lastMsgText.substring(0, 30)}..." | Source: ${lastMsgSource}`);
+            
+            // LOGIC: 
+            // 1. If AI already took over (source === 'ai' or 'bot'), always respond.
+            // 2. If it's a workflow (source === 'workflow'), only respond if it's a handover message.
+            if (lastMsgSource === 'workflow') {
+                const isHandover = !lastMsgText.trim().endsWith('?') || 
+                                 lastMsgText.toLowerCase().includes('help') || 
+                                 lastMsgText.toLowerCase().includes('assistant') ||
+                                 lastMsgText.length > 100;
+                                 
+                if (!isHandover) {
+                    console.log(`⏳ [GATE] Workflow active. Bot staying silent.`);
+                    return;
+                }
+                console.log(`🚀 [GATE] Handover detected. AI taking over.`);
+            }
 
             const authKey = client.apiKey || INTERAKT_KEY;
             
@@ -712,8 +829,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             const isAudio = lowType.includes('audio') || lowType.includes('voice') || !!message.audio;
             const audioUrl = message.attachment?.url || message.media?.url || message.media_url || (message.audio && message.audio.url) || '';
 
-            // --- PARALLEL: Audio Transcription + Chat Lookup ---
-            const [transcribedText, chat] = await Promise.all([
+            // --- PARALLEL: Audio Transcription ---
+            const [transcribedText] = await Promise.all([
                 (async () => {
                     if (isAudio && openai) {
                         if (!audioUrl) return text;
@@ -760,15 +877,20 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         }
                     }
                     return text;
-                })(),
-                Chat.findOne({ clientId, customerPhone })
+                })()
             ]);
+
+            // --- CHECK PAUSE STATUS ---
+            if (activeChat && activeChat.botPaused) {
+                console.log(`⏸️ [PAUSED] Bot is paused for customer: ${customerPhone}`);
+                return;
+            }
 
             text = transcribedText || text || "Audio Message";
             if (!text || text === "Media/Unsupported message") return;
 
-            // Initialize or update chat object
-            let activeChat = chat || new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
+            // Use the already loaded activeChat
+            if (!activeChat) activeChat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
             
             activeChat.messages.push({ 
                 sender: 'customer', 
@@ -874,10 +996,13 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                             console.log(`🖼️ [IMAGE SENT] Image successfully sent to ${customerPhone}.`);
                         }
 
-                        // 3. Save everything to DB
+                        // 3. Save everything to DB and update state
                         if (response) activeChat.messages.push({ sender: 'bot', text: response, msgType: 'text' });
                         if (imageUrl) activeChat.messages.push({ sender: 'bot', text: 'Generated Image', msgType: 'image', mediaUrl: imageUrl });
                         
+                        // IMPORTANT: Mark the state as 'ai' so the next message is automatically handled
+                        lastBotMessages.set(key, { text: response || "Image", source: 'ai', time: Date.now() });
+
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
                         console.log(`💾 [DB SAVE] Chat updated for ${customerPhone}`);
