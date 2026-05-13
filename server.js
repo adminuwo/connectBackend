@@ -876,7 +876,10 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                  lastMsgText.toLowerCase().includes('ask') ||
                                  lastMsgText.length > 100 ||
                                  currentText.includes('bot') || 
-                                 currentText.includes('assistant');
+                                 currentText.includes('assistant') ||
+                                 currentText.includes('ask') ||
+                                 currentText.includes('anything') ||
+                                 currentText.includes('Ask anything');
 
                 if (!isHandover) {
                     console.log(`⏳ [GATE] Workflow active. Bot staying silent.`);
