@@ -68,7 +68,9 @@ const ChatSchema = new mongoose.Schema({
         timestamp: { type: Date, default: Date.now } 
     }],
     lastUpdate: { type: Date, default: Date.now },
-    botPaused: { type: Boolean, default: false }
+    botPaused: { type: Boolean, default: false },
+    handoverActive: { type: Boolean, default: false },
+    handoverExpiresAt: Date
 });
 
 const CampaignSchema = new mongoose.Schema({

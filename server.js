@@ -1052,18 +1052,33 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             console.log(`🤖 [GATE] Last: "${lastMsgText.substring(0, 30)}..." | Source: ${lastMsgSource}`);
 
-            // LOGIC: 
-            // 1. If AI already took over (source === 'ai' or 'bot'), always respond.
-            // 2. If it's a workflow (source === 'workflow'), only respond if "ask anything" is detected.
-            if (lastMsgSource === 'workflow') {
-                const currentText = text.toLowerCase();
-                const isHandover = currentText.includes('ask anything');
+            // --- LOGIC GATE: Persistent Handover Check ---
+            const now = new Date();
+            const isPersistentActive = activeChat && activeChat.handoverActive && activeChat.handoverExpiresAt && new Date(activeChat.handoverExpiresAt) > now;
 
-                if (!isHandover) {
+            if (lastMsgSource === 'workflow' && !isPersistentActive) {
+                const currentText = text.toLowerCase();
+                const isHandoverTrigger = currentText.includes('ask anything');
+
+                if (!isHandoverTrigger) {
                     console.log(`⏳ [GATE] Workflow active. Bot waiting for "ask anything" trigger.`);
                     return;
                 }
-                console.log(`🚀 [GATE] "Ask anything" detected. AI taking over.`);
+                console.log(`🚀 [GATE] "ask anything" detected. AI taking over PERSISTENTLY.`);
+                
+                // Set Persistent State
+                if (activeChat) {
+                    activeChat.handoverActive = true;
+                    activeChat.handoverExpiresAt = new Date(Date.now() + (30 * 60000)); // 30 min timeout
+                    await activeChat.save();
+                }
+            } else if (isPersistentActive) {
+                console.log(`✅ [GATE] Persistent handover active. AI processing...`);
+                // Extend the timeout on each user message
+                if (activeChat) {
+                    activeChat.handoverExpiresAt = new Date(Date.now() + (30 * 60000));
+                    await activeChat.save();
+                }
             }
 
             const authKey = client.apiKey || INTERAKT_KEY;
