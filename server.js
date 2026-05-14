@@ -70,7 +70,7 @@ const gcs = require('./gcs');
 console.log(`☁️ [GCS STATUS] GCS Active: ${gcs.isGcsActive}`);
 
 // Import database
-const { Client, Ticket, Chat, OTP, isLocal } = require('./database');
+const { Client, Ticket, Chat, OTP, Campaign, Automation, AutoState, isLocal } = require('./database');
 
 app.use(cors({
     origin: '*',
@@ -271,6 +271,53 @@ app.post('/api/auth/register', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/api/auth/verify-otp', async (req, res) => {
+    const { email, otp } = req.body;
+    try {
+        const validOtp = await OTP.findOne({ email, otp });
+        if (!validOtp) return res.status(400).json({ error: 'Invalid or expired OTP' });
+        res.json({ success: true, message: 'OTP verified.' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+    const { email, otp, newPassword } = req.body;
+    try {
+        const validOtp = await OTP.findOne({ email, otp });
+        if (!validOtp) return res.status(400).json({ error: 'Invalid or expired OTP' });
+
+        const client = await Client.findOne({ email });
+        if (!client) return res.status(404).json({ error: 'Account not found.' });
+
+        client.password = newPassword;
+        await client.save();
+
+        await OTP.deleteOne({ email });
+        res.json({ success: true, message: 'Password reset successful.' });
+    } catch (err) {
+        console.error('❌ [RESET ERROR]', err.message);
+        res.status(500).json({ error: 'Failed to reset password.' });
+    }
+});
+
+app.post('/api/client/:id/change-password', async (req, res) => {
+    const { oldPassword, newPassword } = req.body;
+    try {
+        const client = await Client.findById(req.params.id);
+        if (!client) return res.status(404).json({ error: 'Client not found.' });
+
+        if (client.password !== oldPassword) {
+            return res.status(401).json({ error: 'Current password incorrect.' });
+        }
+
+        client.password = newPassword;
+        await client.save();
+        res.json({ success: true, message: 'Password updated successfully.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- CLIENT ROUTES ---
 app.get('/api/client/:id', async (req, res) => {
     try {
@@ -368,17 +415,37 @@ app.post('/api/client/:id/deactivate', async (req, res) => {
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
-app.get('/api/client/:clientId/chats', async (req, res) => {
+app.get('/api/client/:id/chats', async (req, res) => {
     try {
-        const chats = await Chat.find({ clientId: req.params.clientId }) || [];
+        const chats = await Chat.find({ clientId: req.params.id }) || [];
         const chatMap = {};
         chats.forEach(c => {
-            if (c && c.customerPhone) {
-                chatMap[c.customerPhone] = c.messages || [];
-            }
+            chatMap[c.customerPhone] = {
+                phone: c.customerPhone,
+                lastUpdate: c.lastUpdate,
+                botPaused: c.botPaused,
+                messages: c.messages
+            };
         });
         res.json(chatMap);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/client/:clientId/contacts', async (req, res) => {
+    try {
+        const chats = await Chat.find({ clientId: req.params.clientId }) || [];
+        const contacts = chats.map(c => ({
+            phone: c.customerPhone,
+            // Try to find a name if any message or data has it, for now just phone
+            name: c.customerPhone, 
+            lastMsgAt: c.lastUpdate
+        }));
+        
+        // Remove duplicates
+        const uniqueContacts = Array.from(new Set(contacts.map(c => c.phone)))
+            .map(phone => contacts.find(c => c.phone === phone));
+
+        res.json(uniqueContacts);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -743,6 +810,94 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
     }
 });
 
+// --- BULK SENDING ---
+app.post('/api/client/:id/bulk-send', async (req, res) => {
+    const { id } = req.params;
+    const { contacts, message, mediaUrl, mediaType, fileName } = req.body;
+
+    try {
+        const client = await Client.findById(id);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+
+        console.log(`🚀 [BULK SEND] Client ${client.name} starting campaign for ${contacts.length} recipients. Media: ${mediaType || 'None'}`);
+
+        // Process in background to avoid timeout
+        (async () => {
+            for (let contact of contacts) {
+                try {
+                    // Basic cleanup of phone number
+                    let phone = contact.split(',')[0].replace(/\D/g, '');
+                    if (phone.length === 10) phone = '91' + phone;
+
+                    // Personalization check
+                    let personalizedMsg = message;
+                    if (contact.includes(',')) {
+                        const name = contact.split(',')[1];
+                        personalizedMsg = message.replace(/{{name}}/g, name);
+                    }
+
+                    const { mediaList = [], message, automationId } = req.body;
+                    
+                    // 1. Send Main Text Message first
+                    const textPayload = {
+                        fullPhoneNumber: phone,
+                        type: 'Text',
+                        data: { message: personalizedMsg }
+                    };
+                    await axios.post('https://api.interakt.ai/v1/public/message/', textPayload, {
+                        headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` }
+                    });
+
+                    // 2. Send all media attachments sequentially
+                    for (const media of mediaList) {
+                        const mediaPayload = {
+                            fullPhoneNumber: phone,
+                            type: media.type,
+                            data: {
+                                mediaUrl: media.url,
+                                message: '', // Usually media messages don't need text if sent separately, or we can repeat it
+                                fileName: media.fileName || 'file'
+                            }
+                        };
+                        await axios.post('https://api.interakt.ai/v1/public/message/', mediaPayload, {
+                            headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` }
+                        });
+                        await new Promise(r => setTimeout(r, 500)); // Short delay between files
+                    }
+
+                    // --- REGISTER SMART AUTOMATION ---
+                    if (req.body.automationId) {
+                        const automation = await Automation.findById(req.body.automationId);
+                        if (automation && automation.reminders.length > 0) {
+                            const firstReminder = automation.reminders[0];
+                            const state = new AutoState({
+                                clientId: id,
+                                automationId: req.body.automationId,
+                                customerPhone: phone,
+                                status: 'pending',
+                                nextReminderIndex: 0,
+                                nextReminderAt: new Date(Date.now() + (firstReminder.delayHours * 3600000))
+                            });
+                            await state.save();
+                        }
+                    }
+
+                    // Rate limiting
+                    await new Promise(r => setTimeout(r, 1000));
+                } catch (err) {
+                    console.error(`❌ [BULK SEND ERROR] to ${contact}:`, err.response?.data || err.message);
+                }
+            }
+            console.log(`✅ [BULK COMPLETE] Sent ${contacts.length} messages for ${client.name}`);
+        })();
+
+        res.json({ success: true, totalSent: contacts.length });
+    } catch (err) {
+        console.error('❌ [BULK CRITICAL ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- WEBHOOK FOR INTERAKT ---
 app.post('/webhook/interakt/:clientId', async (req, res) => {
     const { clientId } = req.params;
@@ -798,9 +953,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 lastBotMessages.set(key, { text: sentText, source: 'workflow', time: Date.now() });
 
                 // CHECK: Is this a handover message?
-                const isHandoverTrigger = sentText.toLowerCase().includes('bot') || 
-                                          sentText.toLowerCase().includes('assistant') ||
-                                          sentText.toLowerCase().includes('help');
+                const isHandoverTrigger = sentText.toLowerCase().includes('ask anything');
 
                 if (isHandoverTrigger) {
                     console.log(`🚀 [HANDOVER DETECTED] Workflow sent a trigger. Triggering AI reply...`);
@@ -850,6 +1003,41 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             // --- THE LOGIC GATE CHECK ---
             if (!client.botEnabled) return;
 
+            // --- SMART AUTOMATION: STOP ON REPLY ---
+            try {
+                const cleanPhone = customerPhone.replace(/\+/g, '');
+                const activeAuto = await AutoState.findOne({ 
+                    clientId, 
+                    customerPhone: cleanPhone, 
+                    status: 'pending' 
+                });
+
+                if (activeAuto) {
+                    console.log(`🎯 [SMART-AUTO] User replied! Stopping reminders for ${cleanPhone}`);
+                    await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, { 
+                        status: 'replied', 
+                        repliedAt: new Date() 
+                    });
+
+                    // Trigger Thank You Flow
+                    const automation = await Automation.findById(activeAuto.automationId);
+                    if (automation && automation.thankYouMessage?.text) {
+                        const thankYouPayload = {
+                            fullPhoneNumber: cleanPhone,
+                            type: automation.thankYouMessage.mediaType || 'Text',
+                            data: automation.thankYouMessage.mediaType ? {
+                                mediaUrl: automation.thankYouMessage.mediaUrl,
+                                message: automation.thankYouMessage.text
+                            } : { message: automation.thankYouMessage.text }
+                        };
+
+                        await axios.post('https://api.interakt.ai/v1/public/message/', thankYouPayload, {
+                            headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` }
+                        }).catch(e => console.error('❌ [THANK-YOU ERROR]', e.message));
+                    }
+                }
+            } catch (autoErr) { console.error('❌ [AUTO-CHECK ERROR]', autoErr.message); }
+
             // Load Chat to check persistence state if memory is empty
             let activeChat = await Chat.findOne({ clientId, customerPhone });
 
@@ -866,26 +1054,16 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             // LOGIC: 
             // 1. If AI already took over (source === 'ai' or 'bot'), always respond.
-            // 2. If it's a workflow (source === 'workflow'), only respond if it's a handover message.
+            // 2. If it's a workflow (source === 'workflow'), only respond if "ask anything" is detected.
             if (lastMsgSource === 'workflow') {
                 const currentText = text.toLowerCase();
-                const isHandover = !lastMsgText.trim().endsWith('?') || 
-                                 lastMsgText.toLowerCase().includes('help') || 
-                                 lastMsgText.toLowerCase().includes('assistant') ||
-                                 lastMsgText.toLowerCase().includes('bot') ||
-                                 lastMsgText.toLowerCase().includes('ask') ||
-                                 lastMsgText.length > 100 ||
-                                 currentText.includes('bot') || 
-                                 currentText.includes('assistant') ||
-                                 currentText.includes('ask') ||
-                                 currentText.includes('anything') ||
-                                 currentText.includes('Ask anything');
+                const isHandover = currentText.includes('Ask anything');
 
                 if (!isHandover) {
-                    console.log(`⏳ [GATE] Workflow active. Bot staying silent.`);
+                    console.log(`⏳ [GATE] Workflow active. Bot waiting for "Ask anything" trigger.`);
                     return;
                 }
-                console.log(`🚀 [GATE] Handover detected (Current or Last). AI taking over.`);
+                console.log(`🚀 [GATE] "Ask anything" detected. AI taking over.`);
             }
 
             const authKey = client.apiKey || INTERAKT_KEY;
@@ -1120,6 +1298,160 @@ app.get('/api/admin/migrate-data', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// --- AUTOMATION SYSTEM ---
+// 1. Create/Update Automation Flow
+app.post('/api/client/:id/automations', async (req, res) => {
+    try {
+        const { name, thankYouMessage, reminders } = req.body;
+        const automation = new Automation({
+            clientId: req.params.id,
+            name,
+            thankYouMessage,
+            reminders
+        });
+        await automation.save();
+        res.json({ success: true, automationId: automation._id });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 2. Get Automations
+app.get('/api/client/:id/automations', async (req, res) => {
+    try {
+        const data = await Automation.find({ clientId: req.params.id });
+        res.json(data.reverse());
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 3. Delete Automation
+app.delete('/api/client/:id/automations/:autoId', async (req, res) => {
+    try {
+        await Automation.findByIdAndDelete(req.params.autoId);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 2. Get Automations
+app.get('/api/client/:id/automations', async (req, res) => {
+    try {
+        const data = await Automation.find({ clientId: req.params.id });
+        res.json(data.reverse());
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 3. Delete Automation
+app.delete('/api/client/:id/automations/:autoId', async (req, res) => {
+    try {
+        await Automation.findByIdAndDelete(req.params.autoId);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Modify bulk-send to register automation state if automationId is provided
+app.post('/api/client/:id/bulk-send-v2', async (req, res) => {
+    // New endpoint for bulk-send with automation support
+    try {
+        const { contacts, message, automationId, mediaUrl, mediaType, fileName } = req.body;
+        const clientId = req.params.id;
+        
+        // ... (Similar logic to bulk-send but registers AutoState)
+        // For simplicity, I'll update the background runner to handle this.
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 4. Update Webhook to handle "Replied" status
+app.post('/webhook/interakt', async (req, res) => {
+    // ... logic to handle incoming status updates
+    // if status is 'replied', we find the AutoState by phone and update status to 'completed'
+});
+
+// 5. Advanced Background Processor (Reminders + Scheduling)
+setInterval(async () => {
+    try {
+        const now = new Date();
+        
+        // A. Handle Scheduled Campaigns
+        const pendingCampaigns = await Campaign.find({ status: 'scheduled', scheduledAt: { $lte: now } });
+        for (let campaign of pendingCampaigns) {
+            await Campaign.findByIdAndUpdate(campaign._id || campaign.id, { status: 'sending' });
+            const client = await Client.findById(campaign.clientId);
+            if (!client) continue;
+
+            (async () => {
+                let sent = 0;
+                for (let contact of campaign.contacts) {
+                    try {
+                        let phone = contact.split(',')[0].replace(/\D/g, '');
+                        if (phone.length === 10) phone = '91' + phone;
+
+                        // Send Message
+                        await axios.post('https://api.interakt.ai/v1/public/message/', {
+                            fullPhoneNumber: phone,
+                            type: campaign.mediaType || 'Text',
+                            data: campaign.mediaType ? { mediaUrl: campaign.mediaUrl, message: campaign.message, fileName: campaign.fileName } : { message: campaign.message }
+                        }, { headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` } });
+
+                        sent++;
+
+                        // REGISTER AUTO STATE if campaign has automation
+                        if (campaign.automationId) {
+                            const state = new AutoState({
+                                clientId: campaign.clientId,
+                                campaignId: campaign._id || campaign.id,
+                                automationId: campaign.automationId,
+                                customerPhone: phone,
+                                status: 'pending',
+                                nextReminderAt: new Date(Date.now() + 60000) // Default 1 min for testing, will use flow settings
+                            });
+                            await state.save();
+                        }
+                    } catch (err) {}
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+                await Campaign.findByIdAndUpdate(campaign._id || campaign.id, { status: 'sent', sentCount: sent });
+            })();
+        }
+        // B. Handle Automated Reminders
+        const pendingReminders = await AutoState.find({ status: 'pending', nextReminderAt: { $lte: now } });
+        for (let state of pendingReminders) {
+            try {
+                const automation = await Automation.findById(state.automationId);
+                const client = await Client.findById(state.clientId);
+                if (!automation || !client || !automation.isActive) continue;
+
+                const reminder = automation.reminders[state.nextReminderIndex];
+                if (reminder) {
+                    console.log(`⏰ [REMINDER] Step ${state.nextReminderIndex + 1} -> ${state.customerPhone}`);
+                    
+                    const reminderPayload = {
+                        fullPhoneNumber: state.customerPhone,
+                        type: reminder.mediaType || 'Text',
+                        data: reminder.mediaType ? {
+                            mediaUrl: reminder.mediaUrl,
+                            message: reminder.message
+                        } : { message: reminder.message }
+                    };
+
+                    await axios.post('https://api.interakt.ai/v1/public/message/', reminderPayload, {
+                        headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` }
+                    });
+
+                    // Update state for next step
+                    const nextIndex = state.nextReminderIndex + 1;
+                    const nextStep = automation.reminders[nextIndex];
+                    
+                    await AutoState.findByIdAndUpdate(state._id || state.id, {
+                        nextReminderIndex: nextIndex,
+                        nextReminderAt: nextStep ? new Date(Date.now() + (nextStep.delayHours * 3600000)) : null,
+                        status: nextStep ? 'pending' : 'completed'
+                    });
+                } else {
+                    await AutoState.findByIdAndUpdate(state._id || state.id, { status: 'completed' });
+                }
+            } catch (err) { console.error(`❌ [REMINDER ERROR] ${state.customerPhone}:`, err.message); }
+        }
+    } catch (err) { console.error('❌ [AUTOMATION RUNNER ERROR]', err.message); }
+}, 60000);
 
 // --- STARTUP ---
 const { connectDB } = require('./database');

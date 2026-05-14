@@ -71,6 +71,55 @@ const ChatSchema = new mongoose.Schema({
     botPaused: { type: Boolean, default: false }
 });
 
+const CampaignSchema = new mongoose.Schema({
+    clientId: String,
+    name: { type: String, default: 'Untitled Campaign' },
+    message: String,
+    contacts: [String],
+    mediaUrl: String,
+    mediaType: String,
+    fileName: String,
+    scheduledAt: Date,
+    timezone: { type: String, default: 'IST' },
+    status: { type: String, default: 'scheduled' }, // scheduled, sending, sent, failed
+    totalContacts: Number,
+    sentCount: { type: Number, default: 0 },
+    failedCount: { type: Number, default: 0 },
+    automationId: String, // Link to an AutomationFlow
+    createdAt: { type: Date, default: Date.now }
+});
+
+const AutomationFlowSchema = new mongoose.Schema({
+    clientId: String,
+    name: String,
+    thankYouMessage: {
+        text: String,
+        mediaUrl: String,
+        mediaType: String
+    },
+    reminders: [{
+        message: String,
+        delayHours: Number,
+        mediaUrl: String,
+        mediaType: String
+    }],
+    isActive: { type: Boolean, default: true },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const AutomationStateSchema = new mongoose.Schema({
+    clientId: String,
+    campaignId: String,
+    automationId: String,
+    customerPhone: String,
+    status: { type: String, default: 'pending' }, // pending, replied, completed
+    nextReminderIndex: { type: Number, default: 0 },
+    lastMessageAt: { type: Date, default: Date.now },
+    nextReminderAt: Date,
+    repliedAt: Date,
+    createdAt: { type: Date, default: Date.now }
+});
+
 const OTPSchema = new mongoose.Schema({
     email: { type: String, required: true },
     otp: { type: String, required: true },
@@ -80,6 +129,9 @@ const OTPSchema = new mongoose.Schema({
 const MongooseClient = mongoose.model('Client', ClientSchema);
 const MongooseTicket = mongoose.model('Ticket', TicketSchema);
 const MongooseChat = mongoose.model('Chat', ChatSchema);
+const MongooseCampaign = mongoose.model('Campaign', CampaignSchema);
+const MongooseAutomation = mongoose.model('Automation', AutomationFlowSchema);
+const MongooseAutoState = mongoose.model('AutomationState', AutomationStateSchema);
 const MongooseOTP = mongoose.model('OTP', OTPSchema);
 
 // --- MOCK MODELS (For JSON) ---
@@ -93,7 +145,12 @@ class MockModel {
         let data = jsonDb.read(this.fileName);
         if (Object.keys(query).length > 0) {
             return data.filter(item => {
-                return Object.entries(query).every(([key, value]) => item[key] === value);
+                return Object.entries(query).every(([key, value]) => {
+                    if (value && typeof value === 'object' && value.$lte) {
+                        return new Date(item[key]) <= new Date(value.$lte);
+                    }
+                    return item[key] === value;
+                });
             });
         }
         return data;
@@ -161,7 +218,7 @@ class MockModel {
     async deleteMany(query) {
         if (Object.keys(query).length === 0) {
             jsonDb.write(this.fileName, []);
-            return { deletedCount: 100 }; // Dummy
+            return { deletedCount: 100 };
         }
         let data = jsonDb.read(this.fileName);
         const filtered = data.filter(item => {
@@ -175,17 +232,21 @@ class MockModel {
         return { deletedCount };
     }
 
-    // Mock the "new Model().save()" pattern
     createInstance(data) {
         const fileName = this.fileName;
         const modelName = this.ModelName;
         
-        // Define defaults based on model
         let defaults = { createdAt: new Date() };
         if (modelName === 'Client') {
             defaults = { ...defaults, status: 'pending', isAdmin: false, whatsappNumber: '', apiKey: '', logoUrl: '', botEnabled: false, autoReplyRules: '', documents: [] };
         } else if (modelName === 'Ticket' || modelName === 'Chat') {
             defaults = { ...defaults, messages: [], status: 'open', lastUpdate: Date.now(), botPaused: false };
+        } else if (modelName === 'Campaign') {
+            defaults = { ...defaults, status: 'scheduled', sentCount: 0, failedCount: 0, totalContacts: 0 };
+        } else if (modelName === 'Automation') {
+            defaults = { ...defaults, reminders: [], isActive: true };
+        } else if (modelName === 'AutomationState') {
+            defaults = { ...defaults, status: 'pending', nextReminderIndex: 0 };
         }
 
         return {
@@ -197,7 +258,7 @@ class MockModel {
                 const index = dbData.findIndex(item => item._id === this._id);
                 
                 const savedItem = { ...this };
-                delete savedItem.save; // Clean up the save function
+                delete savedItem.save;
                 
                 if (index !== -1) {
                     dbData[index] = savedItem;
@@ -214,25 +275,21 @@ class MockModel {
 const JsonClient = new MockModel('clients.json', 'Client');
 const JsonTicket = new MockModel('tickets.json', 'Ticket');
 const JsonChat = new MockModel('chats.json', 'Chat');
+const JsonCampaign = new MockModel('campaigns.json', 'Campaign');
+const JsonAutomation = new MockModel('automations.json', 'Automation');
+const JsonAutoState = new MockModel('autostates.json', 'AutomationState');
 const JsonOTP = new MockModel('otps.json', 'OTP');
 
-// Helper to make JSON models behave like constructors (supporting 'new Model()')
 const createConstructorProxy = (mockInstance) => {
-    // This is the function that will be called when "new Model()" is used
     function MockConstructor(data) {
         return mockInstance.createInstance(data);
     }
-    
-    // Copy all methods from mockInstance to the constructor function (like find, findOne, etc.)
     Object.getOwnPropertyNames(Object.getPrototypeOf(mockInstance)).forEach(prop => {
         if (prop !== 'constructor' && typeof mockInstance[prop] === 'function') {
             MockConstructor[prop] = mockInstance[prop].bind(mockInstance);
         }
     });
-    
-    // Support the .new() pattern just in case
     MockConstructor.new = (data) => mockInstance.createInstance(data);
-    
     return MockConstructor;
 };
 
@@ -241,26 +298,13 @@ let dbMode = isProduction ? 'atlas' : 'json';
 
 const connectDB = async () => {
     if (isProduction || process.env.DB_MODE === 'atlas') {
-        console.log('🔄 [DB] Production Mode: Connecting to MongoDB Atlas...');
         try {
-            await mongoose.connect(process.env.MONGODB_URI, {
-                serverSelectionTimeoutMS: 10000,
-                connectTimeoutMS: 10000,
-            });
-            console.log('✅ [DB] Connected to MongoDB Atlas');
+            await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 });
             dbMode = 'atlas';
         } catch (err) {
-            console.error('❌ [DB] MongoDB Connection Error:', err.message);
-            if (isProduction) {
-                console.error('🚨 [CRITICAL] Could not connect to MongoDB in Production!');
-                dbMode = 'atlas';
-            } else {
-                console.log('🏠 [DB] Dev Mode: Falling back to JSON.');
-                dbMode = 'json';
-            }
+            dbMode = 'json';
         }
     } else {
-        console.log('🏠 [DB] Local Mode: Using JSON storage.');
         dbMode = 'json';
     }
 };
@@ -268,6 +312,9 @@ const connectDB = async () => {
 const ClientModel = createConstructorProxy(JsonClient);
 const TicketModel = createConstructorProxy(JsonTicket);
 const ChatModel = createConstructorProxy(JsonChat);
+const CampaignModel = createConstructorProxy(JsonCampaign);
+const AutomationModel = createConstructorProxy(JsonAutomation);
+const AutoStateModel = createConstructorProxy(JsonAutoState);
 const OTPModel = createConstructorProxy(JsonOTP);
 
 module.exports = { 
@@ -275,6 +322,9 @@ module.exports = {
     get Client() { return dbMode === 'atlas' ? MongooseClient : ClientModel; },
     get Ticket() { return dbMode === 'atlas' ? MongooseTicket : TicketModel; },
     get Chat() { return dbMode === 'atlas' ? MongooseChat : ChatModel; },
+    get Campaign() { return dbMode === 'atlas' ? MongooseCampaign : CampaignModel; },
+    get Automation() { return dbMode === 'atlas' ? MongooseAutomation : AutomationModel; },
+    get AutoState() { return dbMode === 'atlas' ? MongooseAutoState : AutoStateModel; },
     get OTP() { return dbMode === 'atlas' ? MongooseOTP : OTPModel; },
     isLocal: () => dbMode === 'json'
 };

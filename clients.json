@@ -29,7 +29,6 @@
     "password": "123456",
     "_id": "1778218801097"
   },
- 
   {
     "createdAt": "2026-05-09T05:25:59.871Z",
     "status": "approved",
@@ -42,7 +41,7 @@
     "documents": [],
     "name": "aditi",
     "email": "aditi@uwo24.com",
-    "password": "123456",
+    "password": "789456",
     "_id": "1778304359871"
   }
 ]
