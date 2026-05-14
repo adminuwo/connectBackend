@@ -1057,10 +1057,10 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             // 2. If it's a workflow (source === 'workflow'), only respond if "ask anything" is detected.
             if (lastMsgSource === 'workflow') {
                 const currentText = text.toLowerCase();
-                const isHandover = currentText.includes('Ask anything');
+                const isHandover = currentText.includes('ask anything');
 
                 if (!isHandover) {
-                    console.log(`⏳ [GATE] Workflow active. Bot waiting for "Ask anything" trigger.`);
+                    console.log(`⏳ [GATE] Workflow active. Bot waiting for "ask anything" trigger.`);
                     return;
                 }
                 console.log(`🚀 [GATE] "Ask anything" detected. AI taking over.`);
