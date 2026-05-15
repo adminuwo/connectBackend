@@ -1117,20 +1117,18 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 const currentText = text.toLowerCase();
                 const keywords = client.botTriggerKeywords || [];
                 
-                // If keywords are set, check if message contains any. If not set, respond to everything.
+                console.log(`🔍 [GATE] Checking triggers for Client: ${clientId}. Keywords: [${keywords.join(', ')}]`);
+
                 let isTriggered = false;
                 if (keywords.length > 0) {
                     isTriggered = keywords.some(k => currentText.includes(k.toLowerCase()));
                 } else {
-                    // Fallback to "ask anything" OR if empty keywords, allow all messages to trigger AI
-                    // But the user wants keywords to be the primary trigger.
-                    // If keywords is empty, we'll allow any message to trigger it for now, 
-                    // or we could stick to the old "ask anything" as a default.
-                    isTriggered = true; // Default behavior when no keywords set
+                    // Strictly wait for "ask anything" if no keywords are configured
+                    isTriggered = currentText.includes('ask anything');
                 }
 
                 if (!isTriggered) {
-                    console.log(`⏳ [GATE] Bot waiting for trigger keywords: [${keywords.join(', ')}]`);
+                    console.log(`⏳ [GATE] No trigger match. Waiting for: [${keywords.length > 0 ? keywords.join(', ') : 'ask anything'}]`);
                     return;
                 }
 
