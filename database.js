@@ -44,7 +44,8 @@ const ClientSchema = new mongoose.Schema({
     apiKey: { type: String, default: '' },
     logoUrl: { type: String, default: '' },
     botEnabled: { type: Boolean, default: false },
-    autoReplyRules: { type: String, default: '' },
+    botRules: { type: String, default: '' },
+    botTriggerKeywords: { type: [String], default: [] },
     documents: [String],
     createdAt: { type: Date, default: Date.now }
 });
@@ -94,16 +95,20 @@ const CampaignSchema = new mongoose.Schema({
 const AutomationFlowSchema = new mongoose.Schema({
     clientId: String,
     name: String,
-    thankYouMessage: {
-        text: String,
-        mediaUrl: String,
-        mediaType: String
-    },
-    reminders: [{
-        message: String,
-        delayHours: Number,
-        mediaUrl: String,
-        mediaType: String
+    // Stages: [ { stageIndex, message, reminders: [] } ]
+    stages: [{
+        stageIndex: Number,
+        message: {
+            text: String,
+            mediaUrl: String,
+            mediaType: String
+        },
+        reminders: [{
+            message: String,
+            delayHours: Number,
+            mediaUrl: String,
+            mediaType: String
+        }]
     }],
     isActive: { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now }
@@ -111,16 +116,16 @@ const AutomationFlowSchema = new mongoose.Schema({
 
 const AutomationStateSchema = new mongoose.Schema({
     clientId: String,
-    campaignId: String,
-    automationId: String,
     customerPhone: String,
-    status: { type: String, default: 'pending' }, // pending, replied, completed
+    automationId: String,
+    currentStageIndex: { type: Number, default: 0 }, // Current active stage
+    status: { type: String, default: 'pending' }, // pending (waiting for reply), reminder_sent, completed
     nextReminderIndex: { type: Number, default: 0 },
-    lastMessageAt: { type: Date, default: Date.now },
     nextReminderAt: Date,
-    repliedAt: Date,
+    lastInteractionAt: { type: Date, default: Date.now },
     createdAt: { type: Date, default: Date.now }
 });
+
 
 const OTPSchema = new mongoose.Schema({
     email: { type: String, required: true },

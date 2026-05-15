@@ -437,10 +437,10 @@ app.get('/api/client/:clientId/contacts', async (req, res) => {
         const contacts = chats.map(c => ({
             phone: c.customerPhone,
             // Try to find a name if any message or data has it, for now just phone
-            name: c.customerPhone, 
+            name: c.customerPhone,
             lastMsgAt: c.lastUpdate
         }));
-        
+
         // Remove duplicates
         const uniqueContacts = Array.from(new Set(contacts.map(c => c.phone)))
             .map(phone => contacts.find(c => c.phone === phone));
@@ -740,18 +740,18 @@ app.all('/api/client/:clientId/bot/:action', async (req, res) => {
 app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
     const { clientId, phone, action } = req.params;
     const isBotActive = ['on', 'enable', 'start', 'true', 'resume'].includes(action.toLowerCase());
-    
+
     // Normalize phone (Check URL params first, then Body)
     const rawPhone = phone || req.body.phone_number || req.body.phone || req.body.customer_number || "";
     let customerPhone = rawPhone.replace(/\D/g, '');
-    
+
     if (!customerPhone) {
         // Log the full request for debugging
         console.error(`❌ [HANDOVER ERROR] No phone number found in URL or Body!`);
         console.log('📦 [DEBUG] Request Body:', JSON.stringify(req.body));
         return res.status(400).json({ error: 'Phone number is required' });
     }
-    
+
     if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
     if (!customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
 
@@ -772,10 +772,10 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
                 try {
                     const chat = await Chat.findOne({ clientId, customerPhone });
                     const chatHistory = chat ? chat.messages.slice(-5).map(m => ({ sender: m.sender, text: m.text })) : [];
-                    
+
                     // Trigger RAG with a "handover" context
                     const ragResponse = await rag.query(clientId, "The customer has just handed over control to you. Greet them and ask how you can help.", chatHistory, client.name);
-                    
+
                     if (ragResponse.text) {
                         await axios.post(
                             'https://api.interakt.ai/v1/public/message/',
@@ -799,10 +799,10 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
             })();
         }
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             botActive: isBotActive,
-            message: `Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}` 
+            message: `Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}`
         });
     } catch (err) {
         console.error('❌ [HANDOVER ERROR]', err.message);
@@ -821,77 +821,99 @@ app.post('/api/client/:id/bulk-send', async (req, res) => {
 
         console.log(`🚀 [BULK SEND] Client ${client.name} starting campaign for ${contacts.length} recipients. Media: ${mediaType || 'None'}`);
 
-        // Process in background to avoid timeout
-        (async () => {
-            for (let contact of contacts) {
-                try {
-                    // Basic cleanup of phone number
-                    let phone = contact.split(',')[0].replace(/\D/g, '');
-                    if (phone.length === 10) phone = '91' + phone;
+        // Process directly instead of background IIFE to ensure completion on Cloud Run
+        let sent = 0;
+        let failed = 0;
 
-                    // Personalization check
-                    let personalizedMsg = message;
-                    if (contact.includes(',')) {
-                        const name = contact.split(',')[1];
-                        personalizedMsg = message.replace(/{{name}}/g, name);
-                    }
+        // Prepare API Key
+        let authKey = client.apiKey || INTERAKT_KEY;
+        // If key is not base64 encoded (doesn't end with = or contains spaces), encode it
+        if (authKey && !authKey.includes(':') && !authKey.endsWith('=')) {
+            authKey = Buffer.from(authKey + ':').toString('base64');
+        }
 
-                    const { mediaList = [], message, automationId } = req.body;
-                    
-                    // 1. Send Main Text Message first
+        for (let contact of contacts) {
+            try {
+                // Basic cleanup of phone number
+                let phone = contact.split(',')[0].replace(/\D/g, '');
+                if (phone.length === 10) phone = '91' + phone;
+
+                const { mediaList = [], automationId } = req.body;
+
+                // Personalization check
+                let personalizedMsg = message;
+                if (contact.includes(',')) {
+                    const name = contact.split(',')[1];
+                    personalizedMsg = message.replace(/{{name}}/g, name);
+                }
+
+                // 1. Send Main Text Message first
+                if (personalizedMsg) {
                     const textPayload = {
                         fullPhoneNumber: phone,
                         type: 'Text',
                         data: { message: personalizedMsg }
                     };
                     await axios.post('https://api.interakt.ai/v1/public/message/', textPayload, {
-                        headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` }
-                    });
-
-                    // 2. Send all media attachments sequentially
-                    for (const media of mediaList) {
-                        const mediaPayload = {
-                            fullPhoneNumber: phone,
-                            type: media.type,
-                            data: {
-                                mediaUrl: media.url,
-                                message: '', // Usually media messages don't need text if sent separately, or we can repeat it
-                                fileName: media.fileName || 'file'
-                            }
-                        };
-                        await axios.post('https://api.interakt.ai/v1/public/message/', mediaPayload, {
-                            headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` }
-                        });
-                        await new Promise(r => setTimeout(r, 500)); // Short delay between files
-                    }
-
-                    // --- REGISTER SMART AUTOMATION ---
-                    if (req.body.automationId) {
-                        const automation = await Automation.findById(req.body.automationId);
-                        if (automation && automation.reminders.length > 0) {
-                            const firstReminder = automation.reminders[0];
-                            const state = new AutoState({
-                                clientId: id,
-                                automationId: req.body.automationId,
-                                customerPhone: phone,
-                                status: 'pending',
-                                nextReminderIndex: 0,
-                                nextReminderAt: new Date(Date.now() + (firstReminder.delayHours * 3600000))
-                            });
-                            await state.save();
+                        headers: {
+                            'Authorization': `Basic ${authKey}`,
+                            'Content-Type': 'application/json'
                         }
-                    }
-
-                    // Rate limiting
-                    await new Promise(r => setTimeout(r, 1000));
-                } catch (err) {
-                    console.error(`❌ [BULK SEND ERROR] to ${contact}:`, err.response?.data || err.message);
+                    });
                 }
-            }
-            console.log(`✅ [BULK COMPLETE] Sent ${contacts.length} messages for ${client.name}`);
-        })();
 
-        res.json({ success: true, totalSent: contacts.length });
+                // 2. Send all media attachments sequentially
+                for (const media of mediaList) {
+                    const mediaPayload = {
+                        fullPhoneNumber: phone,
+                        type: media.type,
+                        data: {
+                            mediaUrl: media.url,
+                            message: '',
+                            fileName: media.fileName || 'file'
+                        }
+                    };
+                    await axios.post('https://api.interakt.ai/v1/public/message/', mediaPayload, {
+                        headers: {
+                            'Authorization': `Basic ${authKey}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    await new Promise(r => setTimeout(r, 500));
+                }
+
+                // --- REGISTER SMART AUTOMATION (Multi-Stage) ---
+                if (automationId) {
+                    const automation = await Automation.findById(automationId);
+                    if (automation && automation.stages && automation.stages.length > 0) {
+                        const firstStage = automation.stages[0]; // Stage 0 is the initial one (linked to bulk)
+
+                        const state = new AutoState({
+                            clientId: id,
+                            automationId: automationId,
+                            customerPhone: phone,
+                            currentStageIndex: 0,
+                            status: 'pending',
+                            nextReminderIndex: 0,
+                            nextReminderAt: (firstStage.reminders && firstStage.reminders.length > 0)
+                                ? new Date(Date.now() + (firstStage.reminders[0].delayHours * 3600000))
+                                : null
+                        });
+                        await state.save();
+                    }
+                }
+
+                sent++;
+                // Rate limiting
+                await new Promise(r => setTimeout(r, 500));
+            } catch (err) {
+                failed++;
+                console.error(`❌ [BULK SEND ERROR] to ${contact}:`, err.response?.data || err.message);
+            }
+        }
+        console.log(`✅ [BULK COMPLETE] Client ${client.name}: Sent ${sent}, Failed ${failed}`);
+        res.json({ success: true, totalSent: sent, totalFailed: failed });
+
     } catch (err) {
         console.error('❌ [BULK CRITICAL ERROR]', err.message);
         res.status(500).json({ error: err.message });
@@ -932,23 +954,23 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             const sentText = (message.text || message.message || "").trim();
             if (sentText) {
                 console.log(`📝 [TRACKING] Sent by Workflow/Admin: "${sentText.substring(0, 30)}..."`);
-                
+
                 // Track in DB
                 try {
                     const chat = await Chat.findOne({ clientId, customerPhone });
                     let activeChat = chat || new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
-                    activeChat.messages.push({ 
-                        sender: 'workflow', 
-                        text: sentText, 
+                    activeChat.messages.push({
+                        sender: 'workflow',
+                        text: sentText,
                         msgType: 'text',
-                        timestamp: new Date() 
+                        timestamp: new Date()
                     });
                     activeChat.lastUpdate = new Date();
                     await activeChat.save();
                 } catch (dbErr) {
                     console.error('❌ [DB TRACK ERROR]', dbErr.message);
                 }
-                
+
                 // In-memory fallback
                 lastBotMessages.set(key, { text: sentText, source: 'workflow', time: Date.now() });
 
@@ -1002,41 +1024,76 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             // --- THE LOGIC GATE CHECK ---
             if (!client.botEnabled) return;
+            let automationHandled = false;
 
-            // --- SMART AUTOMATION: STOP ON REPLY ---
+            // --- ADVANCED MULTI-STAGE AUTOMATION ---
             try {
                 const cleanPhone = customerPhone.replace(/\+/g, '');
-                const activeAuto = await AutoState.findOne({ 
-                    clientId, 
-                    customerPhone: cleanPhone, 
-                    status: 'pending' 
+                const activeAuto = await AutoState.findOne({
+                    clientId,
+                    customerPhone: cleanPhone,
+                    status: 'pending'
                 });
 
                 if (activeAuto) {
-                    console.log(`🎯 [SMART-AUTO] User replied! Stopping reminders for ${cleanPhone}`);
-                    await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, { 
-                        status: 'replied', 
-                        repliedAt: new Date() 
-                    });
-
-                    // Trigger Thank You Flow
                     const automation = await Automation.findById(activeAuto.automationId);
-                    if (automation && automation.thankYouMessage?.text) {
-                        const thankYouPayload = {
-                            fullPhoneNumber: cleanPhone,
-                            type: automation.thankYouMessage.mediaType || 'Text',
-                            data: automation.thankYouMessage.mediaType ? {
-                                mediaUrl: automation.thankYouMessage.mediaUrl,
-                                message: automation.thankYouMessage.text
-                            } : { message: automation.thankYouMessage.text }
-                        };
+                    if (automation) {
+                        // Advance to Next Stage
+                        const nextStageIndex = activeAuto.currentStageIndex + 1;
+                        const nextStage = automation.stages.find(s => s.stageIndex === nextStageIndex);
 
-                        await axios.post('https://api.interakt.ai/v1/public/message/', thankYouPayload, {
-                            headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` }
-                        }).catch(e => console.error('❌ [THANK-YOU ERROR]', e.message));
+                        if (nextStage) {
+                            console.log(`🎯 [MULTI-AUTO] User replied! Advancing to Stage ${nextStageIndex} for ${cleanPhone}`);
+
+                            // Prepare API Key
+                            let authKey = client.apiKey || INTERAKT_KEY;
+                            if (authKey && !authKey.includes(':') && !authKey.endsWith('=')) {
+                                authKey = Buffer.from(authKey + ':').toString('base64');
+                            }
+
+                            // Send Next Stage Message
+                            const payload = {
+                                fullPhoneNumber: cleanPhone,
+                                type: nextStage.message.mediaType || 'Text',
+                                data: nextStage.message.mediaType ? {
+                                    mediaUrl: nextStage.message.mediaUrl,
+                                    message: nextStage.message.text
+                                } : { message: nextStage.message.text }
+                            };
+
+                            await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
+                                headers: {
+                                    'Authorization': `Basic ${authKey}`,
+                                    'Content-Type': 'application/json'
+                                }
+                            }).catch(e => console.error('❌ [STAGE-SEND ERROR]', e.message));
+
+                            // Update State for New Stage
+                            await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
+                                currentStageIndex: nextStageIndex,
+                                nextReminderIndex: 0,
+                                lastInteractionAt: new Date(),
+                                nextReminderAt: (nextStage.reminders && nextStage.reminders.length > 0)
+                                    ? new Date(Date.now() + (nextStage.reminders[0].delayHours * 3600000))
+                                    : null,
+                                status: 'pending'
+                            });
+                        } else {
+                            console.log(`✅ [MULTI-AUTO] Final stage reached for ${cleanPhone}. Marking completed.`);
+                            await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
+                                status: 'completed',
+                                lastInteractionAt: new Date()
+                            });
+                        }
+                        automationHandled = true; // Mark that automation took care of this reply
                     }
                 }
             } catch (autoErr) { console.error('❌ [AUTO-CHECK ERROR]', autoErr.message); }
+
+            if (automationHandled) {
+                console.log(`⏭️ [GATE] Automation handled the reply. Skipping AI.`);
+                return;
+            }
 
             // Load Chat to check persistence state if memory is empty
             let activeChat = await Chat.findOne({ clientId, customerPhone });
@@ -1052,31 +1109,44 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
             console.log(`🤖 [GATE] Last: "${lastMsgText.substring(0, 30)}..." | Source: ${lastMsgSource}`);
 
-            // --- LOGIC GATE: Persistent Handover Check ---
+            // --- LOGIC GATE: Persistent Handover Check (Dynamic Keywords) ---
             const now = new Date();
             const isPersistentActive = activeChat && activeChat.handoverActive && activeChat.handoverExpiresAt && new Date(activeChat.handoverExpiresAt) > now;
 
-            if (lastMsgSource === 'workflow' && !isPersistentActive) {
+            if (!isPersistentActive) {
                 const currentText = text.toLowerCase();
-                const isHandoverTrigger = currentText.includes('ask anything');
+                const keywords = client.botTriggerKeywords || [];
+                
+                // If keywords are set, check if message contains any. If not set, respond to everything.
+                let isTriggered = false;
+                if (keywords.length > 0) {
+                    isTriggered = keywords.some(k => currentText.includes(k.toLowerCase()));
+                } else {
+                    // Fallback to "ask anything" OR if empty keywords, allow all messages to trigger AI
+                    // But the user wants keywords to be the primary trigger.
+                    // If keywords is empty, we'll allow any message to trigger it for now, 
+                    // or we could stick to the old "ask anything" as a default.
+                    isTriggered = true; // Default behavior when no keywords set
+                }
 
-                if (!isHandoverTrigger) {
-                    console.log(`⏳ [GATE] Workflow active. Bot waiting for "ask anything" trigger.`);
+                if (!isTriggered) {
+                    console.log(`⏳ [GATE] Bot waiting for trigger keywords: [${keywords.join(', ')}]`);
                     return;
                 }
-                console.log(`🚀 [GATE] "ask anything" detected. AI taking over PERSISTENTLY.`);
+
+                console.log(`🚀 [GATE] Trigger detected! AI session started for 5 minutes.`);
                 
-                // Set Persistent State
+                // Set Persistent State (5 Minute Timeout)
                 if (activeChat) {
                     activeChat.handoverActive = true;
-                    activeChat.handoverExpiresAt = new Date(Date.now() + (30 * 60000)); // 30 min timeout
+                    activeChat.handoverExpiresAt = new Date(Date.now() + (5 * 60000)); // 5 min timeout
                     await activeChat.save();
                 }
-            } else if (isPersistentActive) {
-                console.log(`✅ [GATE] Persistent handover active. AI processing...`);
-                // Extend the timeout on each user message
+            } else {
+                console.log(`✅ [GATE] AI session active. Time remaining: ${Math.round((new Date(activeChat.handoverExpiresAt) - now) / 1000)}s`);
+                // Extend the timeout on each user message (Keep it alive for another 5 mins)
                 if (activeChat) {
-                    activeChat.handoverExpiresAt = new Date(Date.now() + (30 * 60000));
+                    activeChat.handoverExpiresAt = new Date(Date.now() + (5 * 60000));
                     await activeChat.save();
                 }
             }
@@ -1174,7 +1244,9 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     text: m.text
                 }));
 
-                const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory, client.name);
+                // --- AI PROCESSING (RAG BASED) ---
+
+                const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory, client.name, client.botRules);
 
                 // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
                 let response = ragResponse.text.trim();
@@ -1193,7 +1265,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                             }
 
                             const payload = {
-                                fullPhoneNumber: customerPhone.replace('+', ''), 
+                                fullPhoneNumber: customerPhone.replace('+', ''),
                                 type: 'Text',
                                 data: { message: response }
                             };
@@ -1210,13 +1282,13 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                                     'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}`,
                                                     'Content-Type': 'application/json'
                                                 },
-                                                timeout: 60000 
+                                                timeout: 60000
                                             }
                                         );
                                         console.log(`✅ [INTERAKT SUCCESS] Text sent to ${customerPhone}`);
                                         return;
                                     } catch (err) {
-                                        console.error(`⚠️ [INTERAKT ERROR] Text Attempt ${i+1}:`, err.response?.data || err.message);
+                                        console.error(`⚠️ [INTERAKT ERROR] Text Attempt ${i + 1}:`, err.response?.data || err.message);
                                         const isRetryable = err.code === 'ECONNRESET' || err.message.includes('socket hang up') || err.code === 'ETIMEDOUT';
                                         if (i === attempts - 1 || !isRetryable) throw err;
                                         await new Promise(r => setTimeout(r, 1000 * (i + 1)));
@@ -1252,7 +1324,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                         console.log(`✅ [INTERAKT SUCCESS] Image sent to ${customerPhone}`);
                                         return;
                                     } catch (err) {
-                                        console.error(`⚠️ [INTERAKT ERROR] Image Attempt ${i+1}:`, err.response?.data || err.message);
+                                        console.error(`⚠️ [INTERAKT ERROR] Image Attempt ${i + 1}:`, err.response?.data || err.message);
                                         if (i === attempts - 1) throw err;
                                         await new Promise(r => setTimeout(r, 2000));
                                     }
@@ -1264,7 +1336,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         // 3. Save everything to DB and update state
                         if (response) activeChat.messages.push({ sender: 'bot', text: response, msgType: 'text' });
                         if (imageUrl) activeChat.messages.push({ sender: 'bot', text: 'Generated Image', msgType: 'image', mediaUrl: imageUrl });
-                        
+
                         // Mark the state as 'ai'
                         lastBotMessages.set(key, { text: response || "Image", source: 'ai', time: Date.now() });
 
@@ -1316,14 +1388,36 @@ app.get('/api/admin/migrate-data', async (req, res) => {
 
 // --- AUTOMATION SYSTEM ---
 // 1. Create/Update Automation Flow
+// 4. Bot Training Config
+app.get('/api/client/:id/bot-config', async (req, res) => {
+    try {
+        const client = await Client.findById(req.params.id);
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+        res.json({
+            botRules: client.botRules || '',
+            botTriggerKeywords: client.botTriggerKeywords || []
+        });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/bot-config', async (req, res) => {
+    try {
+        const { botRules, botTriggerKeywords } = req.body;
+        await Client.findByIdAndUpdate(req.params.id, {
+            botRules,
+            botTriggerKeywords
+        });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/client/:id/automations', async (req, res) => {
     try {
-        const { name, thankYouMessage, reminders } = req.body;
+        const { name, stages } = req.body;
         const automation = new Automation({
             clientId: req.params.id,
             name,
-            thankYouMessage,
-            reminders
+            stages
         });
         await automation.save();
         res.json({ success: true, automationId: automation._id });
@@ -1342,22 +1436,7 @@ app.get('/api/client/:id/automations', async (req, res) => {
 app.delete('/api/client/:id/automations/:autoId', async (req, res) => {
     try {
         await Automation.findByIdAndDelete(req.params.autoId);
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// 2. Get Automations
-app.get('/api/client/:id/automations', async (req, res) => {
-    try {
-        const data = await Automation.find({ clientId: req.params.id });
-        res.json(data.reverse());
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// 3. Delete Automation
-app.delete('/api/client/:id/automations/:autoId', async (req, res) => {
-    try {
-        await Automation.findByIdAndDelete(req.params.autoId);
+        await AutoState.deleteMany({ automationId: req.params.autoId });
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1368,7 +1447,7 @@ app.post('/api/client/:id/bulk-send-v2', async (req, res) => {
     try {
         const { contacts, message, automationId, mediaUrl, mediaType, fileName } = req.body;
         const clientId = req.params.id;
-        
+
         // ... (Similar logic to bulk-send but registers AutoState)
         // For simplicity, I'll update the background runner to handle this.
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1384,7 +1463,7 @@ app.post('/webhook/interakt', async (req, res) => {
 setInterval(async () => {
     try {
         const now = new Date();
-        
+
         // A. Handle Scheduled Campaigns
         const pendingCampaigns = await Campaign.find({ status: 'scheduled', scheduledAt: { $lte: now } });
         for (let campaign of pendingCampaigns) {
@@ -1420,13 +1499,13 @@ setInterval(async () => {
                             });
                             await state.save();
                         }
-                    } catch (err) {}
+                    } catch (err) { }
                     await new Promise(r => setTimeout(r, 1000));
                 }
                 await Campaign.findByIdAndUpdate(campaign._id || campaign.id, { status: 'sent', sentCount: sent });
             })();
         }
-        // B. Handle Automated Reminders
+        // B. Handle Automated Reminders (Multi-Stage)
         const pendingReminders = await AutoState.find({ status: 'pending', nextReminderAt: { $lte: now } });
         for (let state of pendingReminders) {
             try {
@@ -1434,10 +1513,19 @@ setInterval(async () => {
                 const client = await Client.findById(state.clientId);
                 if (!automation || !client || !automation.isActive) continue;
 
-                const reminder = automation.reminders[state.nextReminderIndex];
+                // Get Current Stage
+                const currentStage = automation.stages.find(s => s.stageIndex === state.currentStageIndex);
+                if (!currentStage) continue;
+
+                const reminder = currentStage.reminders[state.nextReminderIndex];
                 if (reminder) {
-                    console.log(`⏰ [REMINDER] Step ${state.nextReminderIndex + 1} -> ${state.customerPhone}`);
-                    
+                    console.log(`⏰ [REMINDER] Stage ${state.currentStageIndex} Step ${state.nextReminderIndex + 1} -> ${state.customerPhone}`);
+
+                    let authKey = client.apiKey || INTERAKT_KEY;
+                    if (authKey && !authKey.includes(':') && !authKey.endsWith('=')) {
+                        authKey = Buffer.from(authKey + ':').toString('base64');
+                    }
+
                     const reminderPayload = {
                         fullPhoneNumber: state.customerPhone,
                         type: reminder.mediaType || 'Text',
@@ -1448,20 +1536,21 @@ setInterval(async () => {
                     };
 
                     await axios.post('https://api.interakt.ai/v1/public/message/', reminderPayload, {
-                        headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` }
+                        headers: {
+                            'Authorization': `Basic ${authKey}`,
+                            'Content-Type': 'application/json'
+                        }
                     });
 
-                    // Update state for next step
+                    // Update state for next step in SAME stage
                     const nextIndex = state.nextReminderIndex + 1;
-                    const nextStep = automation.reminders[nextIndex];
-                    
+                    const nextReminder = currentStage.reminders[nextIndex];
+
                     await AutoState.findByIdAndUpdate(state._id || state.id, {
                         nextReminderIndex: nextIndex,
-                        nextReminderAt: nextStep ? new Date(Date.now() + (nextStep.delayHours * 3600000)) : null,
-                        status: nextStep ? 'pending' : 'completed'
+                        nextReminderAt: nextReminder ? new Date(Date.now() + (nextReminder.delayHours * 3600000)) : null,
+                        // If no more reminders in this stage, we stay in 'pending' status waiting for reply
                     });
-                } else {
-                    await AutoState.findByIdAndUpdate(state._id || state.id, { status: 'completed' });
                 }
             } catch (err) { console.error(`❌ [REMINDER ERROR] ${state.customerPhone}:`, err.message); }
         }

@@ -1,0 +1,96 @@
+[
+  {
+    "createdAt": "2026-05-15T05:32:10.103Z",
+    "reminders": [],
+    "isActive": true,
+    "clientId": "1778045186668",
+    "name": "neww",
+    "stages": [
+      {
+        "stageIndex": 0,
+        "message": {
+          "text": "lrejve[rphjtov[0rtyh\nrṅōēr̥ōḥtr\ntgtkmenrtgpoeitrioer;gtlmflsdrftgvybhjikgtjv9rjt\n\n"
+        },
+        "reminders": [
+          {
+            "message": "",
+            "delayHours": 1
+          },
+          {
+            "message": "",
+            "delayHours": 1
+          }
+        ]
+      },
+      {
+        "stageIndex": 1,
+        "message": {
+          "text": ""
+        },
+        "reminders": [
+          {
+            "message": "",
+            "delayHours": 1
+          }
+        ]
+      }
+    ],
+    "_id": "1778823130103"
+  },
+  {
+    "createdAt": "2026-05-15T06:06:40.537Z",
+    "reminders": [],
+    "isActive": true,
+    "clientId": "1778304359871",
+    "name": "abhaa",
+    "stages": [
+      {
+        "stageIndex": 0,
+        "message": {
+          "text": "abha "
+        },
+        "reminders": [
+          {
+            "message": "lakfjs",
+            "delayHours": 2
+          }
+        ]
+      },
+      {
+        "stageIndex": 1,
+        "message": {
+          "text": "hurrr"
+        },
+        "reminders": [
+          {
+            "message": "erg",
+            "delayHours": 24
+          }
+        ]
+      }
+    ],
+    "_id": "1778825200537"
+  },
+  {
+    "createdAt": "2026-05-15T06:07:58.426Z",
+    "reminders": [],
+    "isActive": true,
+    "clientId": "1778304359871",
+    "name": "abhaa",
+    "stages": [
+      {
+        "stageIndex": 0,
+        "message": {
+          "text": "hdgb"
+        },
+        "reminders": [
+          {
+            "message": "vbc",
+            "delayHours": 1
+          }
+        ]
+      }
+    ],
+    "_id": "1778825278426"
+  }
+]

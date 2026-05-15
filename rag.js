@@ -275,7 +275,7 @@ class SimpleRAG {
         }
     }
 
-    async query(clientId, userQuery, chatHistory = [], clientName = "AISA Connect") {
+    async query(clientId, userQuery, chatHistory = [], clientName = "AISA Connect", botRules = "") {
         if (!this.openai) return { text: "I'm sorry, my AI features are currently offline." };
         
         try {
@@ -296,7 +296,7 @@ class SimpleRAG {
                 const completion = await this.openai.chat.completions.create({
                     model: "gpt-4o-mini",
                     messages: [
-                        { role: "system", content: `You are a high-level Professional AI Business Assistant for ${clientName}. Use a sophisticated yet friendly tone. Use 1-2 relevant emojis. Respond in the same language/style as the user (English, Hindi, or Hinglish). Do NOT use markdown headers (###).` },
+                        { role: "system", content: `You are a high-level Professional AI Business Assistant for ${clientName}. Use a sophisticated yet friendly tone. Respond in the same language/style as the user (English, Hindi, or Hinglish). ${botRules ? `\n\nFollow these custom rules: ${botRules}` : ''}` },
                         { role: "user", content: `${prompt}\n\nUser said: ${userQuery}` }
                     ],
                     temperature: 0.4
@@ -393,6 +393,10 @@ STRICT OPERATIONAL GUIDELINES:
    - Keep paragraphs short and crisp.
    - NO markdown symbols like # or *. Keep it clean for WhatsApp.
 6. NO HALLUCINATIONS: Do not guess. If a price or detail isn't in the context, do not make it up.
+
+${botRules ? `CUSTOM BEHAVIOR RULES:
+${botRules}
+` : ''}
 
 Context from official business documents:
 --------------------------------------------------
