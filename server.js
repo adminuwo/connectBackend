@@ -1439,16 +1439,152 @@ app.delete('/api/client/:id/automations/:autoId', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Modify bulk-send to register automation state if automationId is provided
-app.post('/api/client/:id/bulk-send-v2', async (req, res) => {
-    // New endpoint for bulk-send with automation support
+// --- CAMPAIGN & BULK MESSAGING SYSTEM ---
+// 1. Get Scheduled Campaigns
+app.get('/api/client/:id/scheduled-campaigns', async (req, res) => {
     try {
-        const { contacts, message, automationId, mediaUrl, mediaType, fileName } = req.body;
-        const clientId = req.params.id;
-
-        // ... (Similar logic to bulk-send but registers AutoState)
-        // For simplicity, I'll update the background runner to handle this.
+        const data = await Campaign.find({ clientId: req.params.id });
+        res.json(data.reverse());
     } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 2. Schedule a New Campaign
+app.post('/api/client/:id/schedule-campaign', async (req, res) => {
+    try {
+        const { name, message, contacts, mediaUrl, mediaType, fileName, scheduledAt, timezone } = req.body;
+        const campaign = new Campaign({
+            clientId: req.params.id,
+            name,
+            message,
+            contacts,
+            mediaUrl,
+            mediaType,
+            fileName,
+            scheduledAt: new Date(scheduledAt),
+            timezone: timezone || 'IST',
+            status: 'scheduled',
+            totalContacts: contacts.length
+        });
+        await campaign.save();
+        res.json({ success: true, campaignId: campaign._id });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 3. Delete/Cancel Scheduled Campaign
+app.delete('/api/client/:id/scheduled-campaigns/:campaignId', async (req, res) => {
+    try {
+        await Campaign.findByIdAndDelete(req.params.campaignId);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 4. Real-time Bulk Sending with Streaming Progress
+app.post('/api/client/:id/bulk-send-v2', async (req, res) => {
+    try {
+        const { contacts, message, campaignName, automationId, mediaList } = req.body;
+        const clientId = req.params.id;
+        const client = await Client.findById(clientId);
+
+        if (!client) return res.status(404).json({ error: 'Client not found' });
+
+        // Set headers for streaming
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        // Create a Campaign record for history
+        const campaign = new Campaign({
+            clientId,
+            name: campaignName || 'Instant Campaign',
+            message,
+            contacts,
+            status: 'sending',
+            totalContacts: contacts.length,
+            sentCount: 0,
+            failedCount: 0,
+            createdAt: new Date(),
+            scheduledAt: new Date()
+        });
+        await campaign.save();
+
+        let sent = 0;
+        let failed = 0;
+
+        // Start sending one by one
+        for (let i = 0; i < contacts.length; i++) {
+            let phone = contacts[i].replace(/\D/g, '');
+            if (phone.length === 10) phone = '91' + phone;
+            if (!phone.startsWith('+')) phone = '+' + phone;
+
+            try {
+                let authKey = client.apiKey || INTERAKT_KEY;
+                if (authKey && !authKey.includes(':') && !authKey.endsWith('=')) {
+                    authKey = Buffer.from(authKey + ':').toString('base64');
+                }
+
+                // Send to Interakt
+                const payload = {
+                    fullPhoneNumber: phone,
+                    type: (mediaList && mediaList.length > 0) ? 'Image' : 'Text', // Simple logic for now
+                    data: (mediaList && mediaList.length > 0) ? {
+                        mediaUrl: mediaList[0].url,
+                        message: message
+                    } : { message: message }
+                };
+
+                await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
+                    headers: {
+                        'Authorization': `Basic ${authKey}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                sent++;
+                
+                // If automation is linked, register it
+                if (automationId) {
+                    const state = new AutoState({
+                        clientId,
+                        campaignId: campaign._id,
+                        automationId,
+                        customerPhone: phone,
+                        status: 'pending',
+                        currentStageIndex: 0,
+                        nextReminderIndex: 0,
+                        nextReminderAt: new Date(Date.now() + 60000) // Default start
+                    });
+                    await state.save();
+                }
+
+            } catch (err) {
+                console.error(`❌ [BULK SEND] Failed for ${phone}:`, err.message);
+                failed++;
+            }
+
+            // Stream progress back to frontend
+            res.write(JSON.stringify({
+                sent,
+                failed,
+                total: contacts.length,
+                percent: Math.round(((i + 1) / contacts.length) * 100),
+                done: i === contacts.length - 1
+            }) + '\n');
+
+            // Wait a bit to avoid rate limiting
+            await new Promise(r => setTimeout(r, 800));
+        }
+
+        // Finalize Campaign Status
+        campaign.status = 'sent';
+        campaign.sentCount = sent;
+        campaign.failedCount = failed;
+        await campaign.save();
+
+        res.end();
+    } catch (err) {
+        console.error('❌ [BULK V2 ERROR]', err);
+        res.status(500).end();
+    }
 });
 
 // 4. Update Webhook to handle "Replied" status
