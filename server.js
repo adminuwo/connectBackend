@@ -939,7 +939,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         let msgType = "Text";
 
         // --- LOGIC GATE: Workflow Tracking ---
-        const isSentByBot = message.is_sent_by_me || eventType === 'message_sent' || eventType === 'message_received' === false;
+        const isSentByBot = message.is_sent_by_me === true || message.sender_type === 'Admin' || message.sender_type === 'App' || message.chat_message_type === 'AdminMessage' || eventType === 'message_sent';
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
 
         // Normalize Phone
