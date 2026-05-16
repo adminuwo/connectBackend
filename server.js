@@ -451,6 +451,8 @@ app.post('/api/client/:id/upload-media', authenticateToken, upload.array('files'
                 if (gcsUrl) publicUrl = gcsUrl;
             }
             
+            publicUrl = encodeURI(publicUrl);
+            
             urls.push({
                 fileName: file.originalname,
                 url: publicUrl,
@@ -968,8 +970,10 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                         if (msgType === 'File') msgType = 'Document';
                         dataPayload = {
                             mediaUrl: media.url,
-                            message: personalizedMsg || ''
+                            message: personalizedMsg || '',
+                            fileName: media.fileName || 'document.pdf'
                         };
+                        if (!dataPayload.message) delete dataPayload.message;
                     }
 
                     const payload = {
@@ -1678,9 +1682,11 @@ app.post('/api/client/:id/bulk-send-v2', authenticateToken, async (req, res) => 
                     type: (mediaList && mediaList.length > 0) ? 'Image' : 'Text', // Simple logic for now
                     data: (mediaList && mediaList.length > 0) ? {
                         mediaUrl: mediaList[0].url,
-                        message: message
-                    } : { message: message }
+                        message: message || '',
+                        fileName: mediaList[0].fileName || 'document.pdf'
+                    } : { message: message || '' }
                 };
+                if (payload.data && !payload.data.message) delete payload.data.message;
 
                 await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
                     headers: {
