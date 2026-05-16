@@ -1035,9 +1035,16 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             return res.status(200).json({ status: 'ok' });
         }
 
-        // Extract Data
-        text = (message.text || message.message || "").trim();
-        msgType = message.type || "Text";
+        // Extract Data (Handling Text, Button Replies, and List Replies)
+        if (message.button_reply) {
+            text = message.button_reply.title || "";
+        } else if (message.list_reply) {
+            text = message.list_reply.title || "";
+        } else {
+            text = (message.text || message.message || "").trim();
+        }
+        
+        msgType = message.type || (message.button_reply ? "button_reply" : "Text");
 
         // Check if variables are not replaced (Interakt Test Mode)
         if ((rawPhone && rawPhone.includes('{{')) || (text && text.includes('{{'))) {
