@@ -2,8 +2,7 @@ const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
 
-// Database mode will be determined during connectDB() call
-let dbMode = 'json'; 
+// Database mode will be determined during startup
 
 // Helper to handle JSON storage
 const jsonDb = {
@@ -297,12 +296,15 @@ const createConstructorProxy = (mockInstance) => {
     return MockConstructor;
 };
 
+// --- INITIALIZATION ---
 const isProduction = process.env.NODE_ENV === 'production' || !!process.env.K_SERVICE;
+const forceAtlas = process.env.DB_MODE === 'atlas' || process.env.DB_MODE === 'mongodb';
+
+// Initialize dbMode immediately so exports are correct even during destructuring
+let dbMode = (isProduction || forceAtlas) ? 'atlas' : 'json';
 
 const connectDB = async () => {
-    const forceAtlas = process.env.DB_MODE === 'atlas' || process.env.DB_MODE === 'mongodb';
-    
-    if (isProduction || forceAtlas) {
+    if (dbMode === 'atlas') {
         if (!process.env.MONGODB_URI) {
             console.log('⚠️ [DB] MONGODB_URI is missing. Falling back to Local Mode.');
             dbMode = 'json';
@@ -311,9 +313,7 @@ const connectDB = async () => {
 
         try {
             await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
-            dbMode = 'atlas';
-            const dbName = mongoose.connection.name;
-            console.log(`✅ [DB] Connected to MongoDB Atlas (Database: ${dbName})`);
+            console.log(`✅ [DB] Connected to MongoDB Atlas (Database: ${mongoose.connection.name})`);
             
             // Log collections to verify we are in the right place
             const collections = await mongoose.connection.db.listCollections().toArray();
@@ -325,7 +325,6 @@ const connectDB = async () => {
         }
     } else {
         console.log('🏠 [DB] Running in Local Mode (JSON files)');
-        dbMode = 'json';
     }
 };
 
@@ -337,34 +336,14 @@ const AutomationModel = createConstructorProxy(JsonAutomation);
 const AutoStateModel = createConstructorProxy(JsonAutoState);
 const OTPModel = createConstructorProxy(JsonOTP);
 
-// --- EXPORTS WITH DYNAMIC PROXY ---
-// This ensures that even if you destructure (const { Client } = db),
-// it will always use the correct model based on the current dbMode.
-const createModelProxy = (mongooseModel, jsonModel) => {
-    return new Proxy({}, {
-        get: (target, prop) => {
-            const activeModel = dbMode === 'atlas' ? mongooseModel : jsonModel;
-            return activeModel[prop];
-        },
-        construct: (target, args) => {
-            const activeModel = dbMode === 'atlas' ? mongooseModel : jsonModel;
-            return new activeModel(...args);
-        },
-        apply: (target, thisArg, args) => {
-            const activeModel = dbMode === 'atlas' ? mongooseModel : jsonModel;
-            return activeModel(...args);
-        }
-    });
-};
-
 module.exports = { 
     connectDB,
-    Client: createModelProxy(MongooseClient, ClientModel),
-    Ticket: createModelProxy(MongooseTicket, TicketModel),
-    Chat: createModelProxy(MongooseChat, ChatModel),
-    Campaign: createModelProxy(MongooseCampaign, CampaignModel),
-    Automation: createModelProxy(MongooseAutomation, AutomationModel),
-    AutoState: createModelProxy(MongooseAutoState, AutoStateModel),
-    OTP: createModelProxy(MongooseOTP, OTPModel),
+    get Client() { return dbMode === 'atlas' ? MongooseClient : ClientModel; },
+    get Ticket() { return dbMode === 'atlas' ? MongooseTicket : TicketModel; },
+    get Chat() { return dbMode === 'atlas' ? MongooseChat : ChatModel; },
+    get Campaign() { return dbMode === 'atlas' ? MongooseCampaign : CampaignModel; },
+    get Automation() { return dbMode === 'atlas' ? MongooseAutomation : AutomationModel; },
+    get AutoState() { return dbMode === 'atlas' ? MongooseAutoState : AutoStateModel; },
+    get OTP() { return dbMode === 'atlas' ? MongooseOTP : OTPModel; },
     isLocal: () => dbMode === 'json'
 };
