@@ -890,46 +890,26 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                     personalizedMsg = message.replace(/{{name}}/g, name);
                 }
 
-                // 1. Send Main Text Message first
-                if (personalizedMsg) {
-                    const textPayload = {
-                        fullPhoneNumber: apiPhone,
-                        type: 'Text',
-                        data: { message: personalizedMsg }
-                    };
-                    await axios.post('https://api.interakt.ai/v1/public/message/', textPayload, {
-                        headers: {
-                            'Authorization': `Basic ${authKey}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                }
-
-                // 2. Send all media attachments sequentially
-                for (const media of mediaList) {
-                    const mediaPayload = {
-                        fullPhoneNumber: apiPhone,
-                        type: media.type,
-                        data: {
-                            mediaUrl: media.url,
-                            message: '',
-                            fileName: media.fileName || 'file'
-                        }
-                    };
-                    await axios.post('https://api.interakt.ai/v1/public/message/', mediaPayload, {
-                        headers: {
-                            'Authorization': `Basic ${authKey}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    await new Promise(r => setTimeout(r, 500));
-                }
-
-                // --- REGISTER SMART AUTOMATION (Multi-Stage) ---
+                // REGISTER SMART AUTOMATION (Multi-Stage)
                 if (automationId) {
                     const automation = await Automation.findById(automationId);
                     if (automation && automation.stages && automation.stages.length > 0) {
-                        const firstStage = automation.stages[0]; // Stage 0 is the initial one (linked to bulk)
+                        const firstStage = automation.stages[0];
+                        
+                        // If no message was provided in bulk, use the flow's first stage message
+                        if (!personalizedMsg && firstStage.message && firstStage.message.text) {
+                            personalizedMsg = firstStage.message.text;
+                            
+                            // Send this initial flow message
+                            const textPayload = {
+                                fullPhoneNumber: apiPhone,
+                                type: 'Text',
+                                data: { message: personalizedMsg }
+                            };
+                            await axios.post('https://api.interakt.ai/v1/public/message/', textPayload, {
+                                headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
+                            });
+                        }
 
                         const state = new AutoState({
                             clientId: id,
@@ -946,6 +926,18 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                         });
                         await state.save();
                     }
+                }
+
+                if (personalizedMsg && !automationId) {
+                    // Only send if not already handled by automation initial message
+                    const textPayload = {
+                        fullPhoneNumber: apiPhone,
+                        type: 'Text',
+                        data: { message: personalizedMsg }
+                    };
+                    await axios.post('https://api.interakt.ai/v1/public/message/', textPayload, {
+                        headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
+                    });
                 }
 
                 sent++;
