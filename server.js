@@ -878,6 +878,8 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                 // Basic cleanup of phone number
                 let phone = contact.split(',')[0].replace(/\D/g, '');
                 if (phone.length === 10) phone = '91' + phone;
+                if (!phone.startsWith('+')) phone = '+' + phone;
+                const apiPhone = phone.replace('+', '');
 
                 const { mediaList = [], automationId } = req.body;
 
@@ -891,7 +893,7 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                 // 1. Send Main Text Message first
                 if (personalizedMsg) {
                     const textPayload = {
-                        fullPhoneNumber: phone,
+                        fullPhoneNumber: apiPhone,
                         type: 'Text',
                         data: { message: personalizedMsg }
                     };
@@ -906,7 +908,7 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                 // 2. Send all media attachments sequentially
                 for (const media of mediaList) {
                     const mediaPayload = {
-                        fullPhoneNumber: phone,
+                        fullPhoneNumber: apiPhone,
                         type: media.type,
                         data: {
                             mediaUrl: media.url,
@@ -959,6 +961,27 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
 
     } catch (err) {
         console.error('❌ [BULK CRITICAL ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- AUTOMATION STATUS API ---
+app.get('/api/client/:id/automation-status', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const states = await AutoState.find({ clientId: id }).sort({ lastInteractionAt: -1 }).limit(100);
+        
+        // Enrich with Automation names
+        const enrichedStates = await Promise.all(states.map(async (s) => {
+            const automation = await Automation.findById(s.automationId).select('name');
+            return {
+                ...s.toObject(),
+                automationName: automation ? automation.name : 'Unknown'
+            };
+        }));
+
+        res.json(enrichedStates);
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
