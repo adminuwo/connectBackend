@@ -312,7 +312,12 @@ const connectDB = async () => {
         try {
             await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
             dbMode = 'atlas';
-            console.log('✅ [DB] Connected to MongoDB Atlas');
+            const dbName = mongoose.connection.name;
+            console.log(`✅ [DB] Connected to MongoDB Atlas (Database: ${dbName})`);
+            
+            // Log collections to verify we are in the right place
+            const collections = await mongoose.connection.db.listCollections().toArray();
+            console.log(`📂 [DB] Available collections: ${collections.map(c => c.name).join(', ')}`);
         } catch (err) {
             console.error('❌ [DB] MongoDB Connection Failed:', err.message);
             console.log('🏠 [DB] Falling back to Local Mode (JSON files)');
