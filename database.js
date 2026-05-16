@@ -337,14 +337,34 @@ const AutomationModel = createConstructorProxy(JsonAutomation);
 const AutoStateModel = createConstructorProxy(JsonAutoState);
 const OTPModel = createConstructorProxy(JsonOTP);
 
+// --- EXPORTS WITH DYNAMIC PROXY ---
+// This ensures that even if you destructure (const { Client } = db),
+// it will always use the correct model based on the current dbMode.
+const createModelProxy = (mongooseModel, jsonModel) => {
+    return new Proxy({}, {
+        get: (target, prop) => {
+            const activeModel = dbMode === 'atlas' ? mongooseModel : jsonModel;
+            return activeModel[prop];
+        },
+        construct: (target, args) => {
+            const activeModel = dbMode === 'atlas' ? mongooseModel : jsonModel;
+            return new activeModel(...args);
+        },
+        apply: (target, thisArg, args) => {
+            const activeModel = dbMode === 'atlas' ? mongooseModel : jsonModel;
+            return activeModel(...args);
+        }
+    });
+};
+
 module.exports = { 
     connectDB,
-    get Client() { return dbMode === 'atlas' ? MongooseClient : ClientModel; },
-    get Ticket() { return dbMode === 'atlas' ? MongooseTicket : TicketModel; },
-    get Chat() { return dbMode === 'atlas' ? MongooseChat : ChatModel; },
-    get Campaign() { return dbMode === 'atlas' ? MongooseCampaign : CampaignModel; },
-    get Automation() { return dbMode === 'atlas' ? MongooseAutomation : AutomationModel; },
-    get AutoState() { return dbMode === 'atlas' ? MongooseAutoState : AutoStateModel; },
-    get OTP() { return dbMode === 'atlas' ? MongooseOTP : OTPModel; },
+    Client: createModelProxy(MongooseClient, ClientModel),
+    Ticket: createModelProxy(MongooseTicket, TicketModel),
+    Chat: createModelProxy(MongooseChat, ChatModel),
+    Campaign: createModelProxy(MongooseCampaign, CampaignModel),
+    Automation: createModelProxy(MongooseAutomation, AutomationModel),
+    AutoState: createModelProxy(MongooseAutoState, AutoStateModel),
+    OTP: createModelProxy(MongooseOTP, OTPModel),
     isLocal: () => dbMode === 'json'
 };
