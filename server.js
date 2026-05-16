@@ -432,6 +432,36 @@ app.post('/api/client/:id/upload-logo', authenticateToken, logoUpload.single('lo
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/api/client/:id/upload-media', authenticateToken, upload.array('files'), async (req, res) => {
+    try {
+        const urls = [];
+        const host = req.get('host');
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const baseUrl = `${protocol}://${host}`;
+        
+        for (const file of req.files) {
+            const fileName = file.filename;
+            if (gcs.isGcsActive) {
+                await gcs.uploadToBucket(req.params.id, fileName, file.path);
+            }
+            
+            let publicUrl = `${baseUrl}/uploads/${req.params.id}/${fileName}`;
+            if (gcs.isGcsActive) {
+                const gcsUrl = await gcs.getPublicUrl(req.params.id, fileName);
+                if (gcsUrl) publicUrl = gcsUrl;
+            }
+            
+            urls.push({
+                fileName: file.originalname,
+                url: publicUrl,
+                type: file.mimetype.startsWith('image/') ? 'Image' : 
+                      file.mimetype.startsWith('video/') ? 'Video' : 'Document'
+            });
+        }
+        res.json({ success: true, mediaList: urls });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/client/:id/update-profile', authenticateToken, async (req, res) => {
     try {
         const { name } = req.body;
@@ -928,14 +958,27 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                     }
                 }
 
-                if (personalizedMsg && !automationId) {
-                    // Only send if not already handled by automation initial message
-                    const textPayload = {
+                if (!automationId && (personalizedMsg || (mediaList && mediaList.length > 0))) {
+                    let msgType = 'Text';
+                    let dataPayload = { message: personalizedMsg || '' };
+
+                    if (mediaList && mediaList.length > 0) {
+                        const media = mediaList[0];
+                        msgType = media.type || 'Document';
+                        if (msgType === 'File') msgType = 'Document';
+                        dataPayload = {
+                            mediaUrl: media.url,
+                            message: personalizedMsg || ''
+                        };
+                    }
+
+                    const payload = {
                         fullPhoneNumber: apiPhone,
-                        type: 'Text',
-                        data: { message: personalizedMsg }
+                        type: msgType,
+                        data: dataPayload
                     };
-                    await axios.post('https://api.interakt.ai/v1/public/message/', textPayload, {
+
+                    await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
                         headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
                     });
                 }
