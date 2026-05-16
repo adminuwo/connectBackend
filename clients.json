@@ -43,5 +43,20 @@
     "email": "aditi@uwo24.com",
     "password": "789456",
     "_id": "1778304359871"
+  },
+  {
+    "createdAt": "2026-05-15T18:50:37.529Z",
+    "status": "approved",
+    "isAdmin": false,
+    "whatsappNumber": "",
+    "apiKey": "",
+    "logoUrl": "",
+    "botEnabled": false,
+    "autoReplyRules": "",
+    "documents": [],
+    "name": "abha",
+    "email": "abhajatav18@gmail.com",
+    "password": "Abha2004",
+    "_id": "1778871037529"
   }
 ]

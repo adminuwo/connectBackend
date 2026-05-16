@@ -105,7 +105,8 @@ const AutomationFlowSchema = new mongoose.Schema({
         },
         reminders: [{
             message: String,
-            delayHours: Number,
+            delayHours: Number,      // relative delay (hours)
+            fixedTime: String,       // absolute datetime from dashboard calendar (ISO string)
             mediaUrl: String,
             mediaType: String
         }]

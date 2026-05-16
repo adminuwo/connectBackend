@@ -7,6 +7,10 @@ const multer = require('multer');
 const axios = require('axios');
 
 const nodemailer = require('nodemailer');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-dev-only';
 
 // Email Transporter Configuration
 const transporter = nodemailer.createTransport({
@@ -81,6 +85,26 @@ app.use(cors({
 app.options(/.*/, cors());
 
 app.use(express.json());
+
+// --- SECURITY MIDDLEWARE ---
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) return res.status(401).json({ error: 'Access denied. Token missing.' });
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.status(403).json({ error: 'Invalid or expired token.' });
+        
+        // Ensure user is only accessing their own data unless they are an admin
+        if (req.params.id && req.params.id !== user.clientId && !user.isAdmin) {
+            return res.status(403).json({ error: 'Unauthorized access to this resource.' });
+        }
+        
+        req.user = user;
+        next();
+    });
+};
 
 // Serving Static Files with GCS Fallback logic
 app.get('/uploads/logos/:filename', async (req, res) => {
@@ -178,8 +202,14 @@ app.post('/api/auth/login', async (req, res) => {
     // --- EMERGENCY MASTER UNLOCK ---
     if (normalizedEmail === 'admin@uwo24.com' && password === 'Admin@24') {
         console.log('👑 [MASTER UNLOCK] Admin logged in via override.');
+        const masterToken = jwt.sign(
+            { clientId: '1778045186668', role: 'admin', isAdmin: true },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
         return res.json({
             success: true,
+            token: masterToken,
             clientId: '1778045186668',
             name: 'Master Admin',
             role: 'admin',
@@ -211,8 +241,20 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         console.log(`✅ [SUCCESS] ${client.name} logged in.`);
+
+        const token = jwt.sign(
+            { 
+                clientId: client._id || client.id, 
+                role: client.role || 'client',
+                isAdmin: client.role === 'admin'
+            }, 
+            JWT_SECRET, 
+            { expiresIn: '24h' }
+        );
+
         res.json({
             success: true,
+            token,
             clientId: client._id || client.id,
             name: client.name || 'Connect User',
             role: client.role || 'client',
@@ -300,7 +342,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 });
 
-app.post('/api/client/:id/change-password', async (req, res) => {
+app.post('/api/client/:id/change-password', authenticateToken, async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     try {
         const client = await Client.findById(req.params.id);
@@ -318,8 +360,8 @@ app.post('/api/client/:id/change-password', async (req, res) => {
     }
 });
 
-// --- CLIENT ROUTES ---
-app.get('/api/client/:id', async (req, res) => {
+// --- CLIENT ROUTES (PROTECTED) ---
+app.get('/api/client/:id', authenticateToken, async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -336,7 +378,7 @@ app.get('/api/client/:id', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/config', async (req, res) => {
+app.post('/api/client/:id/config', authenticateToken, async (req, res) => {
     try {
         const { whatsappNumber, apiKey } = req.body;
         await Client.findByIdAndUpdate(req.params.id, { whatsappNumber, apiKey });
@@ -344,7 +386,7 @@ app.post('/api/client/:id/config', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/toggle-bot', async (req, res) => {
+app.post('/api/client/:id/toggle-bot', authenticateToken, async (req, res) => {
     try {
         const { enabled } = req.body;
         const client = await Client.findById(req.params.id);
@@ -356,7 +398,7 @@ app.post('/api/client/:id/toggle-bot', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/upload', upload.array('files'), async (req, res) => {
+app.post('/api/client/:id/upload', authenticateToken, upload.array('files'), async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         const docs = client.documents || [];
@@ -381,7 +423,7 @@ app.post('/api/client/:id/upload', upload.array('files'), async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/upload-logo', logoUpload.single('logo'), async (req, res) => {
+app.post('/api/client/:id/upload-logo', authenticateToken, logoUpload.single('logo'), async (req, res) => {
     try {
         const logoUrl = `/uploads/logos/${req.file.filename}`;
         await Client.findByIdAndUpdate(req.params.id, { logoUrl });
@@ -394,7 +436,7 @@ app.post('/api/client/:id/upload-logo', logoUpload.single('logo'), async (req, r
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/update-profile', async (req, res) => {
+app.post('/api/client/:id/update-profile', authenticateToken, async (req, res) => {
     try {
         const { name } = req.body;
         await Client.findByIdAndUpdate(req.params.id, { name });
@@ -402,20 +444,20 @@ app.post('/api/client/:id/update-profile', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/delete-whatsapp', async (req, res) => {
+app.post('/api/client/:id/delete-whatsapp', authenticateToken, async (req, res) => {
     try {
         await Client.findByIdAndUpdate(req.params.id, { whatsappNumber: '', apiKey: '', botEnabled: false });
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/deactivate', async (req, res) => {
+app.post('/api/client/:id/deactivate', authenticateToken, async (req, res) => {
     try {
         await Client.findByIdAndDelete(req.params.id);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/client/:id/chats', async (req, res) => {
+app.get('/api/client/:id/chats', authenticateToken, async (req, res) => {
     try {
         const chats = await Chat.find({ clientId: req.params.id }) || [];
         const chatMap = {};
@@ -431,7 +473,7 @@ app.get('/api/client/:id/chats', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/client/:clientId/contacts', async (req, res) => {
+app.get('/api/client/:clientId/contacts', authenticateToken, async (req, res) => {
     try {
         const chats = await Chat.find({ clientId: req.params.clientId }) || [];
         const contacts = chats.map(c => ({
@@ -449,7 +491,7 @@ app.get('/api/client/:clientId/contacts', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.delete('/api/client/:id/chats/:phone', async (req, res) => {
+app.delete('/api/client/:id/chats/:phone', authenticateToken, async (req, res) => {
     try {
         await Chat.deleteOne({ clientId: req.params.id, customerPhone: req.params.phone });
         res.json({ success: true });
@@ -457,7 +499,7 @@ app.delete('/api/client/:id/chats/:phone', async (req, res) => {
 });
 
 // Get the public GCS URL for document preview (used by Google Docs Viewer)
-app.get('/api/client/:id/documents/:filename/preview-url', async (req, res) => {
+app.get('/api/client/:id/documents/:filename/preview-url', authenticateToken, async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -476,7 +518,7 @@ app.get('/api/client/:id/documents/:filename/preview-url', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/client/:id/documents/:filename', async (req, res) => {
+app.get('/api/client/:id/documents/:filename', authenticateToken, async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -499,7 +541,7 @@ app.get('/api/client/:id/documents/:filename', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.delete('/api/client/:id/documents/:filename', async (req, res) => {
+app.delete('/api/client/:id/documents/:filename', authenticateToken, async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -531,7 +573,7 @@ app.delete('/api/client/:id/documents/:filename', async (req, res) => {
 });
 
 // Delete ALL documents for a client
-app.delete('/api/client/:id/documents', async (req, res) => {
+app.delete('/api/client/:id/documents', authenticateToken, async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -811,7 +853,7 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
 });
 
 // --- BULK SENDING ---
-app.post('/api/client/:id/bulk-send', async (req, res) => {
+app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { contacts, message, mediaUrl, mediaType, fileName } = req.body;
 
@@ -896,7 +938,9 @@ app.post('/api/client/:id/bulk-send', async (req, res) => {
                             status: 'pending',
                             nextReminderIndex: 0,
                             nextReminderAt: (firstStage.reminders && firstStage.reminders.length > 0)
-                                ? new Date(Date.now() + (firstStage.reminders[0].delayHours * 3600000))
+                                ? (firstStage.reminders[0].fixedTime
+                                    ? new Date(firstStage.reminders[0].fixedTime)
+                                    : new Date(Date.now() + ((firstStage.reminders[0].delayHours || 1) * 3600000)))
                                 : null
                         });
                         await state.save();
@@ -1019,76 +1063,101 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         processedMessageIds.add(messageId);
         if (processedMessageIds.size > 2000) processedMessageIds.delete(processedMessageIds.values().next().value);
 
+        // --- CONCURRENCY LOCK: Prevent overlapping requests for same phone ---
+        if (inFlightRequests.has(lockKey)) {
+            console.log(`⏳ [LOCK] Already processing a request for ${customerPhone}. Skipping.`);
+            return;
+        }
+        inFlightRequests.add(lockKey);
+
         try {
-            console.time(`⏱️ [TOTAL TIME] ${customerPhone}`);
+                console.time(`⏱️ [TOTAL TIME] ${customerPhone}`);
 
-            // --- THE LOGIC GATE CHECK ---
-            if (!client.botEnabled) return;
-            let automationHandled = false;
+                // Fetch Chat to check bot status
+                let activeChat = await Chat.findOne({ clientId, customerPhone });
 
-            // --- ADVANCED MULTI-STAGE AUTOMATION ---
-            try {
-                const cleanPhone = customerPhone.replace(/\+/g, '');
-                const activeAuto = await AutoState.findOne({
-                    clientId,
-                    customerPhone: cleanPhone,
-                    status: 'pending'
-                });
+                // --- THE LOGIC GATE CHECK ---
+                if (!client.botEnabled) return;
+                let automationHandled = false;
 
-                if (activeAuto) {
-                    const automation = await Automation.findById(activeAuto.automationId);
-                    if (automation) {
-                        // Advance to Next Stage
-                        const nextStageIndex = activeAuto.currentStageIndex + 1;
-                        const nextStage = automation.stages.find(s => s.stageIndex === nextStageIndex);
+                // --- ADVANCED MULTI-STAGE AUTOMATION ---
+                try {
+                    const cleanPhone = customerPhone.replace(/\+/g, '');
 
-                        if (nextStage) {
-                            console.log(`🎯 [MULTI-AUTO] User replied! Advancing to Stage ${nextStageIndex} for ${cleanPhone}`);
+                    // Check 1: Is AI Bot session currently active?
+                    const isBotSessionActive = activeChat && activeChat.handoverActive && activeChat.handoverExpiresAt && new Date(activeChat.handoverExpiresAt) > new Date();
 
-                            // Prepare API Key
-                            let authKey = client.apiKey || INTERAKT_KEY;
-                            if (authKey && !authKey.includes(':') && !authKey.endsWith('=')) {
-                                authKey = Buffer.from(authKey + ':').toString('base64');
-                            }
+                    // Check 2: Does this message contain a trigger keyword?
+                    const currentTextLower = text.toLowerCase();
+                    const triggerKeywords = client.botTriggerKeywords || [];
+                    const isTriggerKeyword = triggerKeywords.length > 0
+                        ? triggerKeywords.some(k => currentTextLower.includes(k.toLowerCase()))
+                        : currentTextLower.includes('ask anything');
 
-                            // Send Next Stage Message
-                            const payload = {
-                                fullPhoneNumber: cleanPhone,
-                                type: nextStage.message.mediaType || 'Text',
-                                data: nextStage.message.mediaType ? {
-                                    mediaUrl: nextStage.message.mediaUrl,
-                                    message: nextStage.message.text
-                                } : { message: nextStage.message.text }
-                            };
-
-                            await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
-                                headers: {
-                                    'Authorization': `Basic ${authKey}`,
-                                    'Content-Type': 'application/json'
-                                }
-                            }).catch(e => console.error('❌ [STAGE-SEND ERROR]', e.message));
-
-                            // Update State for New Stage
-                            await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
-                                currentStageIndex: nextStageIndex,
-                                nextReminderIndex: 0,
-                                lastInteractionAt: new Date(),
-                                nextReminderAt: (nextStage.reminders && nextStage.reminders.length > 0)
-                                    ? new Date(Date.now() + (nextStage.reminders[0].delayHours * 3600000))
-                                    : null,
-                                status: 'pending'
-                            });
+                    // GATE: Bot active OR trigger keyword → skip ALL automation
+                    if (isBotSessionActive || isTriggerKeyword) {
+                        if (isTriggerKeyword && !isBotSessionActive) {
+                            console.log(`🚨 [GATE] Trigger keyword inside automation. Bot taking over for ${cleanPhone}`);
+                            // Close the automation so reminders stop too
+                            await AutoState.findOneAndUpdate(
+                                { clientId, customerPhone: cleanPhone, status: 'pending' },
+                                { status: 'completed', lastInteractionAt: new Date() }
+                            );
                         } else {
-                            console.log(`✅ [MULTI-AUTO] Final stage reached for ${cleanPhone}. Marking completed.`);
-                            await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
-                                status: 'completed',
-                                lastInteractionAt: new Date()
-                            });
+                            console.log(`🤖 [GATE] AI session active. Skipping automation for ${cleanPhone}`);
                         }
-                        automationHandled = true; // Mark that automation took care of this reply
+                        // Do NOT set automationHandled — let the AI logic below run
+                    } else {
+                        // GATE: No bot session, no trigger → process automation stage
+                        const activeAuto = await AutoState.findOne({ clientId, customerPhone: cleanPhone, status: 'pending' });
+
+                        if (activeAuto) {
+                            const automation = await Automation.findById(activeAuto.automationId);
+                            if (automation) {
+                                const nextStageIndex = activeAuto.currentStageIndex + 1;
+                                const nextStage = automation.stages.find(s => s.stageIndex === nextStageIndex);
+
+                                if (nextStage) {
+                                    console.log(`🎯 [MULTI-AUTO] Advancing to Stage ${nextStageIndex} for ${cleanPhone}`);
+
+                                    let authKey = client.apiKey || INTERAKT_KEY;
+                                    if (authKey && !authKey.includes(':') && !authKey.endsWith('=')) {
+                                        authKey = Buffer.from(authKey + ':').toString('base64');
+                                    }
+
+                                    const payload = {
+                                        fullPhoneNumber: cleanPhone,
+                                        type: nextStage.message.mediaType || 'Text',
+                                        data: nextStage.message.mediaType
+                                            ? { mediaUrl: nextStage.message.mediaUrl, message: nextStage.message.text }
+                                            : { message: nextStage.message.text }
+                                    };
+
+                                    await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
+                                        headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
+                                    }).catch(e => console.error('❌ [STAGE-SEND ERROR]', e.message));
+
+                                    await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
+                                        currentStageIndex: nextStageIndex,
+                                        nextReminderIndex: 0,
+                                        lastInteractionAt: new Date(),
+                                        nextReminderAt: (nextStage.reminders && nextStage.reminders.length > 0)
+                                            ? new Date(Date.now() + (nextStage.reminders[0].delayHours * 3600000))
+                                            : null,
+                                        status: 'pending'
+                                    });
+                                } else {
+                                    console.log(`✅ [MULTI-AUTO] Final stage reached for ${cleanPhone}. Marking completed.`);
+                                    await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
+                                        status: 'completed',
+                                        lastInteractionAt: new Date()
+                                    });
+                                }
+                                automationHandled = true;
+                            }
+                        }
                     }
-                }
-            } catch (autoErr) { console.error('❌ [AUTO-CHECK ERROR]', autoErr.message); }
+                } catch (autoErr) { console.error('❌ [AUTO-CHECK ERROR]', autoErr.message); }
 
             if (automationHandled) {
                 console.log(`⏭️ [GATE] Automation handled the reply. Skipping AI.`);
@@ -1096,7 +1165,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             }
 
             // Load Chat to check persistence state if memory is empty
-            let activeChat = await Chat.findOne({ clientId, customerPhone });
+            activeChat = activeChat || await Chat.findOne({ clientId, customerPhone });
 
             let state = lastBotMessages.get(key);
             if (!state && activeChat && activeChat.messages.length > 0) {
@@ -1352,6 +1421,9 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             }
         } catch (err) {
             console.error('❌ [WEBHOOK ERROR]', err.message);
+        } finally {
+            // Always release the lock
+            inFlightRequests.delete(lockKey);
         }
     } catch (err) {
         console.error('💥 [WEBHOOK CRITICAL ERROR]', err.message);
@@ -1387,7 +1459,7 @@ app.get('/api/admin/migrate-data', async (req, res) => {
 // --- AUTOMATION SYSTEM ---
 // 1. Create/Update Automation Flow
 // 4. Bot Training Config
-app.get('/api/client/:id/bot-config', async (req, res) => {
+app.get('/api/client/:id/bot-config', authenticateToken, async (req, res) => {
     try {
         const client = await Client.findById(req.params.id);
         if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -1398,7 +1470,7 @@ app.get('/api/client/:id/bot-config', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/bot-config', async (req, res) => {
+app.post('/api/client/:id/bot-config', authenticateToken, async (req, res) => {
     try {
         const { botRules, botTriggerKeywords } = req.body;
         await Client.findByIdAndUpdate(req.params.id, {
@@ -1409,7 +1481,7 @@ app.post('/api/client/:id/bot-config', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/client/:id/automations', async (req, res) => {
+app.post('/api/client/:id/automations', authenticateToken, async (req, res) => {
     try {
         const { name, stages } = req.body;
         const automation = new Automation({
@@ -1423,7 +1495,7 @@ app.post('/api/client/:id/automations', async (req, res) => {
 });
 
 // 2. Get Automations
-app.get('/api/client/:id/automations', async (req, res) => {
+app.get('/api/client/:id/automations', authenticateToken, async (req, res) => {
     try {
         const data = await Automation.find({ clientId: req.params.id });
         res.json(data.reverse());
@@ -1431,7 +1503,7 @@ app.get('/api/client/:id/automations', async (req, res) => {
 });
 
 // 3. Delete Automation
-app.delete('/api/client/:id/automations/:autoId', async (req, res) => {
+app.delete('/api/client/:id/automations/:autoId', authenticateToken, async (req, res) => {
     try {
         await Automation.findByIdAndDelete(req.params.autoId);
         await AutoState.deleteMany({ automationId: req.params.autoId });
@@ -1441,7 +1513,7 @@ app.delete('/api/client/:id/automations/:autoId', async (req, res) => {
 
 // --- CAMPAIGN & BULK MESSAGING SYSTEM ---
 // 1. Get Scheduled Campaigns
-app.get('/api/client/:id/scheduled-campaigns', async (req, res) => {
+app.get('/api/client/:id/scheduled-campaigns', authenticateToken, async (req, res) => {
     try {
         const data = await Campaign.find({ clientId: req.params.id });
         res.json(data.reverse());
@@ -1449,7 +1521,7 @@ app.get('/api/client/:id/scheduled-campaigns', async (req, res) => {
 });
 
 // 2. Schedule a New Campaign
-app.post('/api/client/:id/schedule-campaign', async (req, res) => {
+app.post('/api/client/:id/schedule-campaign', authenticateToken, async (req, res) => {
     try {
         const { name, message, contacts, mediaUrl, mediaType, fileName, scheduledAt, timezone } = req.body;
         const campaign = new Campaign({
@@ -1471,7 +1543,7 @@ app.post('/api/client/:id/schedule-campaign', async (req, res) => {
 });
 
 // 3. Delete/Cancel Scheduled Campaign
-app.delete('/api/client/:id/scheduled-campaigns/:campaignId', async (req, res) => {
+app.delete('/api/client/:id/scheduled-campaigns/:campaignId', authenticateToken, async (req, res) => {
     try {
         await Campaign.findByIdAndDelete(req.params.campaignId);
         res.json({ success: true });
@@ -1479,7 +1551,7 @@ app.delete('/api/client/:id/scheduled-campaigns/:campaignId', async (req, res) =
 });
 
 // 4. Real-time Bulk Sending with Streaming Progress
-app.post('/api/client/:id/bulk-send-v2', async (req, res) => {
+app.post('/api/client/:id/bulk-send-v2', authenticateToken, async (req, res) => {
     try {
         const { contacts, message, campaignName, automationId, mediaList } = req.body;
         const clientId = req.params.id;
@@ -1623,13 +1695,29 @@ setInterval(async () => {
 
                         // REGISTER AUTO STATE if campaign has automation
                         if (campaign.automationId) {
+                            const automation = await Automation.findById(campaign.automationId);
+                            let firstStageReminderAt = null;
+                            
+                            if (automation && automation.stages && automation.stages.length > 0) {
+                                const firstStage = automation.stages[0];
+                                if (firstStage.reminders && firstStage.reminders.length > 0) {
+                                    const r = firstStage.reminders[0];
+                                    // Support both fixedTime (calendar) and delayHours (relative)
+                                    if (r.fixedTime) {
+                                        firstStageReminderAt = new Date(r.fixedTime);
+                                    } else if (r.delayHours) {
+                                        firstStageReminderAt = new Date(Date.now() + (r.delayHours * 3600000));
+                                    }
+                                }
+                            }
+
                             const state = new AutoState({
                                 clientId: campaign.clientId,
                                 campaignId: campaign._id || campaign.id,
                                 automationId: campaign.automationId,
                                 customerPhone: phone,
                                 status: 'pending',
-                                nextReminderAt: new Date(Date.now() + 60000) // Default 1 min for testing, will use flow settings
+                                nextReminderAt: firstStageReminderAt
                             });
                             await state.save();
                         }
@@ -1643,6 +1731,16 @@ setInterval(async () => {
         const pendingReminders = await AutoState.find({ status: 'pending', nextReminderAt: { $lte: now } });
         for (let state of pendingReminders) {
             try {
+                // CRITICAL FIX: Check if AI Bot is currently active for this customer
+                const chat = await Chat.findOne({ clientId: state.clientId, customerPhone: state.customerPhone });
+                const isBotActive = chat && chat.handoverActive && chat.handoverExpiresAt && new Date(chat.handoverExpiresAt) > now;
+                
+                if (isBotActive) {
+                    console.log(`🤖 [REMINDER SKIP] AI session active for ${state.customerPhone}. Delaying reminder.`);
+                    // We don't delete it, just skip this cycle so it checks again later
+                    continue;
+                }
+
                 const automation = await Automation.findById(state.automationId);
                 const client = await Client.findById(state.clientId);
                 if (!automation || !client || !automation.isActive) continue;
@@ -1682,8 +1780,11 @@ setInterval(async () => {
 
                     await AutoState.findByIdAndUpdate(state._id || state.id, {
                         nextReminderIndex: nextIndex,
-                        nextReminderAt: nextReminder ? new Date(Date.now() + (nextReminder.delayHours * 3600000)) : null,
-                        // If no more reminders in this stage, we stay in 'pending' status waiting for reply
+                        nextReminderAt: nextReminder
+                            ? (nextReminder.fixedTime
+                                ? new Date(nextReminder.fixedTime)                          // calendar-based
+                                : new Date(Date.now() + ((nextReminder.delayHours || 1) * 3600000))) // relative
+                            : null,
                     });
                 }
             } catch (err) { console.error(`❌ [REMINDER ERROR] ${state.customerPhone}:`, err.message); }
