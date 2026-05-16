@@ -969,14 +969,14 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
 app.get('/api/client/:id/automation-status', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const states = await AutoState.find({ clientId: id }).sort({ lastInteractionAt: -1 }).limit(100);
+        // Search by both string and potentially ObjectId to be safe
+        const states = await AutoState.find({ clientId: id }).sort({ createdAt: -1 }).limit(100);
         
-        // Enrich with Automation names
         const enrichedStates = await Promise.all(states.map(async (s) => {
             const automation = await Automation.findById(s.automationId).select('name');
             return {
                 ...s.toObject(),
-                automationName: automation ? automation.name : 'Unknown'
+                automationName: automation ? automation.name : 'Automation Flow'
             };
         }));
 
