@@ -797,12 +797,15 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
         const client = await Client.findById(clientId);
         if (!client) return res.status(404).json({ error: 'Client not found' });
 
+        // Normalize phone: Remove '+' and whitespace
+        const customerPhoneNorm = customerPhone.toString().trim().replace(/\+/g, '');
+
         await Chat.findOneAndUpdate(
-            { clientId, customerPhone },
+            { clientId, customerPhone: customerPhoneNorm },
             { botPaused: !isBotActive },
             { upsert: true }
         );
-        console.log(`🤝 [HANDOVER] Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}`);
+        console.log(`🤝 [HANDOVER] Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhoneNorm}`);
 
         // If activating, send an immediate "Welcome/Assistant" message
         if (isBotActive && openai) {
@@ -982,7 +985,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         const isSentByBot = message.is_sent_by_me === true || message.sender_type === 'Admin' || message.sender_type === 'App' || message.chat_message_type === 'AdminMessage' || eventType === 'message_sent';
         const rawPhone = message.customer_number || body.data?.customer?.phone_number || "unknown";
 
-        // Normalize Phone
+        // Normalize Phone: Always ensure '+' prefix for the database
         let customerPhone = rawPhone === "unknown" ? "unknown" : rawPhone.replace(/\D/g, '');
         if (customerPhone.length === 10) customerPhone = '91' + customerPhone;
         if (customerPhone !== "unknown" && !customerPhone.startsWith('+')) customerPhone = '+' + customerPhone;
@@ -1732,7 +1735,7 @@ setInterval(async () => {
                                 clientId: campaign.clientId,
                                 campaignId: campaign._id || campaign.id,
                                 automationId: campaign.automationId,
-                                customerPhone: phone,
+                                customerPhone: phone.startsWith('+') ? phone : '+' + phone,
                                 status: 'pending',
                                 nextReminderAt: firstStageReminderAt
                             });
