@@ -1014,8 +1014,9 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 // In-memory fallback
                 lastBotMessages.set(key, { text: sentText, source: 'workflow', time: Date.now() });
 
-                // CHECK: Is this a handover message?
-                const isHandoverTrigger = sentText.toLowerCase().includes('ask anything');
+                // CHECK: Is this a handover message (workflow triggering the bot)?
+                const triggerKeywords = client.botTriggerKeywords || [];
+                const isHandoverTrigger = triggerKeywords.length > 0 && triggerKeywords.some(k => sentText.toLowerCase().includes(k.toLowerCase()));
 
                 if (isHandoverTrigger) {
                     console.log(`🚀 [HANDOVER DETECTED] Workflow sent a trigger. Triggering AI reply...`);
@@ -1088,19 +1089,28 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     const triggerKeywords = client.botTriggerKeywords || [];
                     const isTriggerKeyword = triggerKeywords.length > 0
                         ? triggerKeywords.some(k => currentTextLower.includes(k.toLowerCase()))
-                        : currentTextLower.includes('ask anything');
+                        : false; // Removed hardcoded 'ask anything' fallback
 
                     // GATE: Bot active OR trigger keyword → skip ALL automation
                     if (isBotSessionActive || isTriggerKeyword) {
-                        if (isTriggerKeyword && !isBotSessionActive) {
-                            console.log(`🚨 [GATE] Trigger keyword inside automation. Bot taking over for ${cleanPhone}`);
-                            // Close the automation so reminders stop too
+                        const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000);
+                        if (isTriggerKeyword) {
+                            console.log(`🚨 [GATE] Trigger keyword detected. Starting/Refreshing 5m AI session for ${cleanPhone}`);
+                            await Chat.findOneAndUpdate(
+                                { clientId, customerPhone: cleanPhone },
+                                { handoverActive: true, handoverExpiresAt: fiveMinutesFromNow },
+                                { upsert: true }
+                            );
                             await AutoState.findOneAndUpdate(
                                 { clientId, customerPhone: cleanPhone, status: 'pending' },
                                 { status: 'completed', lastInteractionAt: new Date() }
                             );
-                        } else {
-                            console.log(`🤖 [GATE] AI session active. Skipping automation for ${cleanPhone}`);
+                        } else if (isBotSessionActive) {
+                            console.log(`🤖 [GATE] AI session active. Extending for 5m for ${cleanPhone}`);
+                            await Chat.findOneAndUpdate(
+                                { clientId, customerPhone: cleanPhone },
+                                { handoverExpiresAt: fiveMinutesFromNow }
+                            );
                         }
                         // Do NOT set automationHandled — let the AI logic below run
                     } else {
@@ -1294,7 +1304,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             await activeChat.save(); // Save immediately so dashboard shows the message
 
             // --- BACKGROUND SAVE + AI PROCESS ---
-            if (openai) {
+            // Re-check session status here for final decision
+            const isBotSessionActiveFinal = activeChat && activeChat.handoverActive && activeChat.handoverExpiresAt && new Date(activeChat.handoverExpiresAt) > new Date();
+            
+            // Only proceed with AI if session is active (started by trigger word)
+            if (openai && isBotSessionActiveFinal) {
                 console.log(`🧠 [AI] Processing: ${text}`);
                 console.time(`🔍 [RAG+AI] ${customerPhone}`);
 
