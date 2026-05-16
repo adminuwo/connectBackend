@@ -1772,21 +1772,18 @@ setInterval(async () => {
         }
         // B. Handle Automated Reminders (Multi-Stage)
         const pendingReminders = await AutoState.find({ status: 'pending', nextReminderAt: { $lte: now } });
-        for (let state of pendingReminders) {
+        for (const state of pendingReminders) {
             try {
-                // CRITICAL FIX: Check if AI Bot is currently active for this customer
-                const chat = await Chat.findOne({ clientId: state.clientId, customerPhone: state.customerPhone });
-                const isBotActive = chat && chat.handoverActive && chat.handoverExpiresAt && new Date(chat.handoverExpiresAt) > now;
-                
-                if (isBotActive) {
-                    console.log(`🤖 [REMINDER SKIP] AI session active for ${state.customerPhone}. Delaying reminder.`);
-                    // We don't delete it, just skip this cycle so it checks again later
+                const client = await Client.findById(state.clientId);
+                const automation = await Automation.findById(state.automationId);
+                if (!client || !automation || !automation.isActive) continue;
+
+                // --- GATE: Check if Bot Session is Active ---
+                const chatState = await Chat.findOne({ clientId: state.clientId, customerPhone: state.customerPhone });
+                if (chatState && chatState.botSessionActive) {
+                    console.log(`🤖 [AUTO-RUN] Skipping ${state.customerPhone} - AI Bot is talking.`);
                     continue;
                 }
-
-                const automation = await Automation.findById(state.automationId);
-                const client = await Client.findById(state.clientId);
-                if (!automation || !client || !automation.isActive) continue;
 
                 // Get Current Stage
                 const currentStage = automation.stages.find(s => s.stageIndex === state.currentStageIndex);
@@ -1801,8 +1798,10 @@ setInterval(async () => {
                         authKey = Buffer.from(authKey + ':').toString('base64');
                     }
 
+                    const apiPhone = state.customerPhone.replace('+', '');
+
                     const reminderPayload = {
-                        fullPhoneNumber: state.customerPhone,
+                        fullPhoneNumber: apiPhone,
                         type: reminder.mediaType || 'Text',
                         data: reminder.mediaType ? {
                             mediaUrl: reminder.mediaUrl,
@@ -1828,6 +1827,7 @@ setInterval(async () => {
                                 ? new Date(nextReminder.fixedTime)                          // calendar-based
                                 : new Date(Date.now() + ((nextReminder.delayHours || 1) * 3600000))) // relative
                             : null,
+                        status: nextReminder ? 'pending' : 'completed'
                     });
                 }
             } catch (err) { console.error(`❌ [REMINDER ERROR] ${state.customerPhone}:`, err.message); }
