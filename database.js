@@ -2,12 +2,8 @@ const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
 
-let useLocal = process.env.DB_MODE === 'json' || !process.env.MONGODB_URI;
-
-// Removed redundant top-level connection. Use connectDB() instead.
-
-const reason = process.env.DB_MODE === 'json' ? 'DB_MODE=json' : 'MONGODB_URI is missing';
-console.log(`🏠 [DB] Running in Local Mode: Using JSON files for storage (${reason})`);
+// Database mode will be determined during connectDB() call
+let dbMode = 'json'; 
 
 // Helper to handle JSON storage
 const jsonDb = {
@@ -302,17 +298,28 @@ const createConstructorProxy = (mockInstance) => {
 };
 
 const isProduction = process.env.NODE_ENV === 'production' || !!process.env.K_SERVICE;
-let dbMode = isProduction ? 'atlas' : 'json'; 
 
 const connectDB = async () => {
-    if (isProduction || process.env.DB_MODE === 'atlas') {
+    const forceAtlas = process.env.DB_MODE === 'atlas' || process.env.DB_MODE === 'mongodb';
+    
+    if (isProduction || forceAtlas) {
+        if (!process.env.MONGODB_URI) {
+            console.log('⚠️ [DB] MONGODB_URI is missing. Falling back to Local Mode.');
+            dbMode = 'json';
+            return;
+        }
+
         try {
-            await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 });
+            await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
             dbMode = 'atlas';
+            console.log('✅ [DB] Connected to MongoDB Atlas');
         } catch (err) {
+            console.error('❌ [DB] MongoDB Connection Failed:', err.message);
+            console.log('🏠 [DB] Falling back to Local Mode (JSON files)');
             dbMode = 'json';
         }
     } else {
+        console.log('🏠 [DB] Running in Local Mode (JSON files)');
         dbMode = 'json';
     }
 };
