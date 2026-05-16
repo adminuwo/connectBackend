@@ -218,21 +218,17 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     try {
-        // 1. Try Live DB
-        let client = await Client.findOne({ email: normalizedEmail });
-
-        // 2. Local Fallback
-        if (!client) {
-            console.log('🏠 [LOGIN] Checking local fallback...');
-            const localClients = JSON.parse(fs.readFileSync(path.join(__dirname, 'clients.json'), 'utf8') || '[]');
-            client = localClients.find(c => c.email.toLowerCase().trim() === normalizedEmail);
-        }
+        // 1. Find Client (uses Atlas or JSON based on connection)
+        const client = await Client.findOne({ email: normalizedEmail });
 
         if (!client) {
+            console.log(`❌ [LOGIN] Account not found: ${normalizedEmail}`);
             return res.status(401).json({ error: 'Account not found. Please register first.' });
         }
 
+        // 2. Check Password
         if (client.password !== password) {
+            console.log(`❌ [LOGIN] Incorrect password for: ${normalizedEmail}`);
             return res.status(401).json({ error: 'Incorrect password.' });
         }
 
