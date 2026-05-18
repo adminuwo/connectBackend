@@ -1642,7 +1642,55 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         ? triggerKeywords.some(k => currentTextLower.includes(k.toLowerCase()))
                         : false; // Removed hardcoded 'ask anything' fallback
 
-                    // GATE: Bot active OR trigger keyword → skip ALL automation
+                    // 1. Process Automation Stages First (to advance stage and cancel previous reminders!)
+                    const activeAuto = await AutoState.findOne({ clientId, customerPhone: cleanPhone, status: 'pending' });
+                    if (activeAuto) {
+                        const automation = await Automation.findById(activeAuto.automationId);
+                        if (automation) {
+                            const nextStageIndex = activeAuto.currentStageIndex + 1;
+                            const nextStage = automation.stages.find(s => s.stageIndex === nextStageIndex);
+
+                            if (nextStage) {
+                                console.log(`🎯 [MULTI-AUTO] Advancing to Stage ${nextStageIndex} for ${cleanPhone}`);
+
+                                let authKey = client.apiKey || INTERAKT_KEY;
+                                if (authKey && !authKey.includes(':') && !authKey.endsWith('=')) {
+                                    authKey = Buffer.from(authKey + ':').toString('base64');
+                                }
+
+                                const payload = {
+                                    fullPhoneNumber: cleanPhone,
+                                    type: nextStage.message.mediaType || 'Text',
+                                    data: nextStage.message.mediaType
+                                        ? { mediaUrl: nextStage.message.mediaUrl, message: nextStage.message.text }
+                                        : { message: nextStage.message.text }
+                                };
+
+                                await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
+                                    headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
+                                }).catch(e => console.error('❌ [STAGE-SEND ERROR]', e.message));
+
+                                await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
+                                    currentStageIndex: nextStageIndex,
+                                    nextReminderIndex: 0,
+                                    lastInteractionAt: new Date(),
+                                    nextReminderAt: (nextStage.reminders && nextStage.reminders.length > 0)
+                                        ? new Date(Date.now() + (nextStage.reminders[0].delayHours * 3600000))
+                                        : null,
+                                    status: 'pending'
+                                });
+                            } else {
+                                console.log(`✅ [MULTI-AUTO] Final stage reached for ${cleanPhone}. Marking completed.`);
+                                await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
+                                    status: 'completed',
+                                    lastInteractionAt: new Date()
+                                });
+                            }
+                            automationHandled = true;
+                        }
+                    }
+
+                    // 2. Process AI Chatbot session triggers & extensions
                     if (isBotSessionActive || isTriggerKeyword) {
                         const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000);
                         if (isTriggerKeyword) {
@@ -1652,6 +1700,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                 { handoverActive: true, handoverExpiresAt: fiveMinutesFromNow },
                                 { upsert: true }
                             );
+                            // Complete any pending automation if trigger keyword was explicitly typed
                             await AutoState.findOneAndUpdate(
                                 { clientId, customerPhone: cleanPhone, status: 'pending' },
                                 { status: 'completed', lastInteractionAt: new Date() }
@@ -1662,56 +1711,6 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                 { clientId, customerPhone: cleanPhone },
                                 { handoverExpiresAt: fiveMinutesFromNow }
                             );
-                        }
-                        // Do NOT set automationHandled — let the AI logic below run
-                    } else {
-                        // GATE: No bot session, no trigger → process automation stage
-                        const activeAuto = await AutoState.findOne({ clientId, customerPhone: cleanPhone, status: 'pending' });
-
-                        if (activeAuto) {
-                            const automation = await Automation.findById(activeAuto.automationId);
-                            if (automation) {
-                                const nextStageIndex = activeAuto.currentStageIndex + 1;
-                                const nextStage = automation.stages.find(s => s.stageIndex === nextStageIndex);
-
-                                if (nextStage) {
-                                    console.log(`🎯 [MULTI-AUTO] Advancing to Stage ${nextStageIndex} for ${cleanPhone}`);
-
-                                    let authKey = client.apiKey || INTERAKT_KEY;
-                                    if (authKey && !authKey.includes(':') && !authKey.endsWith('=')) {
-                                        authKey = Buffer.from(authKey + ':').toString('base64');
-                                    }
-
-                                    const payload = {
-                                        fullPhoneNumber: cleanPhone,
-                                        type: nextStage.message.mediaType || 'Text',
-                                        data: nextStage.message.mediaType
-                                            ? { mediaUrl: nextStage.message.mediaUrl, message: nextStage.message.text }
-                                            : { message: nextStage.message.text }
-                                    };
-
-                                    await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
-                                        headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
-                                    }).catch(e => console.error('❌ [STAGE-SEND ERROR]', e.message));
-
-                                    await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
-                                        currentStageIndex: nextStageIndex,
-                                        nextReminderIndex: 0,
-                                        lastInteractionAt: new Date(),
-                                        nextReminderAt: (nextStage.reminders && nextStage.reminders.length > 0)
-                                            ? new Date(Date.now() + (nextStage.reminders[0].delayHours * 3600000))
-                                            : null,
-                                        status: 'pending'
-                                    });
-                                } else {
-                                    console.log(`✅ [MULTI-AUTO] Final stage reached for ${cleanPhone}. Marking completed.`);
-                                    await AutoState.findByIdAndUpdate(activeAuto._id || activeAuto.id, {
-                                        status: 'completed',
-                                        lastInteractionAt: new Date()
-                                    });
-                                }
-                                automationHandled = true;
-                            }
                         }
                     }
                 } catch (autoErr) { console.error('❌ [AUTO-CHECK ERROR]', autoErr.message); }
@@ -2370,7 +2369,8 @@ setInterval(async () => {
 
                 // --- GATE: Check if Bot Session is Active ---
                 const chatState = await Chat.findOne({ clientId: state.clientId, customerPhone: state.customerPhone });
-                if (chatState && chatState.botSessionActive) {
+                const isBotSessionActive = chatState && chatState.handoverActive && chatState.handoverExpiresAt && new Date(chatState.handoverExpiresAt) > new Date();
+                if (isBotSessionActive) {
                     console.log(`🤖 [AUTO-RUN] Skipping ${state.customerPhone} - AI Bot is talking.`);
                     continue;
                 }
