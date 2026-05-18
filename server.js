@@ -1394,6 +1394,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
         }
 
         const message = body.data?.message;
+        if (!message) {
+            console.log(`ℹ️ [WEBHOOK] Ignored event (no message body): ${body.type || 'unknown'}`);
+            return res.status(200).json({ status: 'ok' });
+        }
+
         const eventType = body.type || "unknown";
         let text = "";
         let msgType = "Text";
@@ -1452,8 +1457,105 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 const isHandoverTrigger = triggerKeywords.length > 0 && triggerKeywords.some(k => sentText.toLowerCase().includes(k.toLowerCase()));
 
                 if (isHandoverTrigger) {
-                    console.log(`🚀 [HANDOVER DETECTED] Workflow sent a trigger. Triggering AI reply...`);
-                    // Proceed to AI logic below
+                    console.log(`🚀 [HANDOVER DETECTED] Workflow sent a trigger: "${sentText.substring(0, 30)}...". Triggering AI reply...`);
+                    
+                    const fiveMinutesFromNow = new Date(Date.now() + 5 * 60000);
+                    let activeChat = await Chat.findOne({ clientId, customerPhone });
+                    if (!activeChat) {
+                        activeChat = new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
+                    }
+                    activeChat.handoverActive = true;
+                    activeChat.handoverExpiresAt = fiveMinutesFromNow;
+                    
+                    // Log the outgoing trigger message if not already present
+                    const lastMsg = activeChat.messages[activeChat.messages.length - 1];
+                    const isAlreadyLogged = lastMsg && 
+                        (lastMsg.sender === 'bot' || lastMsg.sender === 'workflow') && 
+                        lastMsg.text === sentText;
+                        
+                    if (!isAlreadyLogged) {
+                        activeChat.messages.push({
+                            sender: 'workflow',
+                            text: sentText,
+                            msgType: 'text',
+                            timestamp: new Date()
+                        });
+                    }
+                    activeChat.lastUpdate = new Date();
+                    await activeChat.save();
+                    
+                    const cleanPhone = customerPhone.replace(/\+/g, '');
+                    await AutoState.findOneAndUpdate(
+                        { clientId, customerPhone: cleanPhone, status: 'pending' },
+                        { status: 'completed', lastInteractionAt: new Date() }
+                    );
+                    
+                    // 2. Trigger dynamic AI welcome reply instantly based on their custom RAG knowledge
+                    if (openai && client.botEnabled && !activeChat.botPaused) {
+                        console.log(`🧠 [AI INSTANT TRIGGER] Querying RAG welcome response for ${customerPhone}...`);
+                        const chatHistory = activeChat.messages.slice(-5).map(m => ({
+                            sender: m.sender,
+                            text: m.text
+                        }));
+                        
+                        const ragResponse = await rag.query(clientId, 'hello', chatHistory, client.name, client.botRules);
+                        let response = ragResponse.text.trim();
+                        const imageUrl = ragResponse.imageUrl;
+                        
+                        if (response || imageUrl) {
+                            try {
+                                if (response) {
+                                    const payload = {
+                                        fullPhoneNumber: cleanPhone,
+                                        type: 'Text',
+                                        data: { message: response }
+                                    };
+                                    
+                                    await axios.post(
+                                        'https://api.interakt.ai/v1/public/message/',
+                                        payload,
+                                        {
+                                            headers: {
+                                                'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}`,
+                                                'Content-Type': 'application/json'
+                                            },
+                                            timeout: 60000
+                                        }
+                                    );
+                                    console.log(`✅ [INTERAKT SUCCESS] Instant AI welcome sent to ${customerPhone}`);
+                                    activeChat.messages.push({ sender: 'bot', text: response, msgType: 'text' });
+                                }
+                                
+                                if (imageUrl) {
+                                    const imgPayload = {
+                                        fullPhoneNumber: cleanPhone,
+                                        type: 'Image',
+                                        data: {
+                                            mediaUrl: imageUrl,
+                                            message: response || "Welcome! 👋"
+                                        }
+                                    };
+                                    await axios.post(
+                                        'https://api.interakt.ai/v1/public/message/',
+                                        imgPayload,
+                                        {
+                                            headers: { 'Authorization': `Basic ${client.apiKey || INTERAKT_KEY}` },
+                                            timeout: 60000
+                                        }
+                                    );
+                                    console.log(`✅ [INTERAKT SUCCESS] Instant welcome image sent to ${customerPhone}`);
+                                }
+                                
+                                activeChat.lastUpdate = new Date();
+                                await activeChat.save();
+                                triggerRealtimeSync(clientId, activeChat);
+                            } catch (sendErr) {
+                                console.error('❌ [AI INSTANT TRIGGER ERR]', sendErr.response?.data || sendErr.message);
+                            }
+                        }
+                    }
+                    
+                    return res.status(200).json({ status: 'ok', detail: 'instant_bot_activation' });
                 } else {
                     return res.status(200).json({ status: 'ok' });
                 }
