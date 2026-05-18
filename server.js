@@ -1250,6 +1250,23 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                             await axios.post('https://api.interakt.ai/v1/public/message/', textPayload, {
                                 headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
                             });
+
+                            // Proactively save first stage flow message to Chat collection!
+                            try {
+                                const chat = await Chat.findOne({ clientId: id, customerPhone: phone });
+                                let activeChat = chat || new Chat({ clientId: id, customerPhone: phone, messages: [], lastUpdate: new Date() });
+                                activeChat.messages.push({
+                                    sender: 'workflow',
+                                    text: personalizedMsg,
+                                    msgType: 'text',
+                                    timestamp: new Date()
+                                });
+                                activeChat.lastUpdate = new Date();
+                                await activeChat.save();
+                                triggerRealtimeSync(id, activeChat);
+                            } catch (dbErr) {
+                                console.error('❌ [FLOW INIT DB LOG ERROR]', dbErr.message);
+                            }
                         }
 
                         const state = new AutoState({
@@ -1294,6 +1311,24 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                     await axios.post('https://api.interakt.ai/v1/public/message/', payload, {
                         headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
                     });
+
+                    // Proactively save standard bulk campaign message to Chat collection!
+                    try {
+                        const chat = await Chat.findOne({ clientId: id, customerPhone: phone });
+                        let activeChat = chat || new Chat({ clientId: id, customerPhone: phone, messages: [], lastUpdate: new Date() });
+                        activeChat.messages.push({
+                            sender: 'workflow',
+                            text: personalizedMsg || (mediaList && mediaList.length > 0 ? `Sent attachment: ${mediaList[0].fileName}` : 'Campaign Message'),
+                            msgType: (mediaList && mediaList.length > 0) ? 'media' : 'text',
+                            mediaUrl: (mediaList && mediaList.length > 0) ? mediaList[0].url : '',
+                            timestamp: new Date()
+                        });
+                        activeChat.lastUpdate = new Date();
+                        await activeChat.save();
+                        triggerRealtimeSync(id, activeChat);
+                    } catch (dbErr) {
+                        console.error('❌ [BULK DB LOG ERROR]', dbErr.message);
+                    }
                 }
 
                 sent++;
@@ -2019,6 +2054,24 @@ app.post('/api/client/:id/bulk-send-v2', authenticateToken, async (req, res) => 
                     }
                 });
 
+                // Proactively save to Chat collection so it shows up in Live Chats!
+                try {
+                    const chat = await Chat.findOne({ clientId, customerPhone: phone });
+                    let activeChat = chat || new Chat({ clientId, customerPhone: phone, messages: [], lastUpdate: new Date() });
+                    activeChat.messages.push({
+                        sender: 'workflow',
+                        text: message || (mediaList && mediaList.length > 0 ? `Sent attachment: ${mediaList[0].fileName}` : 'Campaign Message'),
+                        msgType: (mediaList && mediaList.length > 0) ? 'media' : 'text',
+                        mediaUrl: (mediaList && mediaList.length > 0) ? mediaList[0].url : '',
+                        timestamp: new Date()
+                    });
+                    activeChat.lastUpdate = new Date();
+                    await activeChat.save();
+                    triggerRealtimeSync(clientId, activeChat);
+                } catch (dbErr) {
+                    console.error('❌ [BULK V2 DB LOG ERROR]', dbErr.message);
+                }
+
                 sent++;
                 
                 // If automation is linked, register it
@@ -2180,6 +2233,24 @@ setInterval(async () => {
                             'Content-Type': 'application/json'
                         }
                     });
+
+                    // Proactively save automation reminder to Chat collection!
+                    try {
+                        const chat = await Chat.findOne({ clientId: state.clientId, customerPhone: state.customerPhone });
+                        let activeChat = chat || new Chat({ clientId: state.clientId, customerPhone: state.customerPhone, messages: [], lastUpdate: new Date() });
+                        activeChat.messages.push({
+                            sender: 'workflow',
+                            text: reminder.message || (reminder.mediaUrl ? `Sent attachment: ${reminder.mediaUrl}` : 'Flow Reminder'),
+                            msgType: reminder.mediaUrl ? 'media' : 'text',
+                            mediaUrl: reminder.mediaUrl || '',
+                            timestamp: new Date()
+                        });
+                        activeChat.lastUpdate = new Date();
+                        await activeChat.save();
+                        triggerRealtimeSync(state.clientId, activeChat);
+                    } catch (dbErr) {
+                        console.error('❌ [REMINDER DB LOG ERROR]', dbErr.message);
+                    }
 
                     // Update state for next step in SAME stage
                     const nextIndex = state.nextReminderIndex + 1;
