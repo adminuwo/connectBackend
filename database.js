@@ -66,7 +66,22 @@ const ChatSchema = new mongoose.Schema({
     lastUpdate: { type: Date, default: Date.now },
     botPaused: { type: Boolean, default: false },
     handoverActive: { type: Boolean, default: false },
-    handoverExpiresAt: Date
+    handoverExpiresAt: Date,
+    name: { type: String, default: "" },
+    email: { type: String, default: "" },
+    interestScore: { type: Number, default: 0 },
+    botReply: { type: String, default: "" },
+    campaignSource: { type: String, default: "" },
+    assignedAgent: { type: String, default: "" },
+    followUpStatus: { type: String, default: "pending" },
+    reminderStatus: { type: String, default: "none" },
+    tags: { type: [String], default: [] },
+    summary: { type: String, default: "" },
+    intentAnalysis: { type: String, default: "Pending" },
+    conversionStatus: { type: String, default: "not_converted" },
+    messageCount: { type: Number, default: 0 },
+    language: { type: String, default: "English" },
+    notes: { type: String, default: "" }
 });
 
 const CampaignSchema = new mongoose.Schema({
@@ -268,8 +283,31 @@ class MockModel {
         let defaults = { createdAt: new Date() };
         if (modelName === 'Client') {
             defaults = { ...defaults, status: 'pending', isAdmin: false, whatsappNumber: '', apiKey: '', logoUrl: '', botEnabled: false, autoReplyRules: '', documents: [] };
-        } else if (modelName === 'Ticket' || modelName === 'Chat') {
-            defaults = { ...defaults, messages: [], status: 'open', lastUpdate: Date.now(), botPaused: false };
+        } else if (modelName === 'Ticket') {
+            defaults = { ...defaults, messages: [], status: 'open', lastUpdate: Date.now() };
+        } else if (modelName === 'Chat') {
+            defaults = { 
+                ...defaults, 
+                messages: [], 
+                status: 'open', 
+                lastUpdate: Date.now(), 
+                botPaused: false,
+                name: '',
+                email: '',
+                interestScore: 0,
+                botReply: '',
+                campaignSource: '',
+                assignedAgent: '',
+                followUpStatus: 'pending',
+                reminderStatus: 'none',
+                tags: [],
+                summary: '',
+                intentAnalysis: 'Pending',
+                conversionStatus: 'not_converted',
+                messageCount: 0,
+                language: 'English',
+                notes: ''
+            };
         } else if (modelName === 'Campaign') {
             defaults = { ...defaults, status: 'scheduled', sentCount: 0, failedCount: 0, totalContacts: 0 };
         } else if (modelName === 'Automation') {

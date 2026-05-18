@@ -464,6 +464,70 @@ ${contextText || "CRITICAL: NO RELEVANT DOCUMENTS FOUND. Inform the user that yo
         }
     }
 
+    async analyzeLeadWithAI(chatHistory) {
+        if (!this.openai) return null;
+
+        try {
+            // Take the last 10 messages for summary/intent extraction
+            const recentMessages = chatHistory.slice(-10).map(m => `${m.sender}: ${m.text}`).join('\n');
+            const latestMessage = chatHistory[chatHistory.length - 1]?.text || "";
+
+            const prompt = `
+Analyze the following WhatsApp conversation between a business bot/agent and a customer.
+Extract key CRM reporting fields from the conversation.
+
+CONVERSATION HISTORY:
+${recentMessages}
+
+LATEST MESSAGE FROM CUSTOMER:
+"${latestMessage}"
+
+Please analyze and return a strictly formatted JSON object with the following fields:
+1. "language": Detect the customer's language (e.g., "English", "Hindi", "Spanish", "Hinglish").
+2. "email": Extract any email address mentioned by the customer. Return an empty string if none found. Do NOT invent one.
+3. "intentAnalysis": Classify customer intent into one of: "Interested", "Hot", "Cold", "Qualified", "Pending".
+4. "summary": A very brief 1-sentence summary of the conversation state (e.g. "Customer asking for product pricing").
+5. "tags": An array of 1-3 short tags representing key interests or attributes (e.g., ["pricing", "demo", "support"]).
+6. "notes": Any specific notes or requests mentioned by the customer (e.g. "Wants to connect on Zoom next Tuesday").
+7. "scoreIncrement": Based on the LATEST customer message, check for these specific actions and assign score increments:
+   - If they specifically asked about pricing/costs/plans/packages -> assign 20
+   - If they explicitly requested a demo, call, Zoom meeting, or support appointment -> assign 30
+   - If they shared direct details (email, company name, address, alternate number) -> assign 40
+   - Otherwise -> assign 0
+
+Return ONLY a valid JSON object matching the schema below. No other text, no markdown code block backticks (like \`\`\`json).
+
+Schema:
+{
+  "language": "Detected Language",
+  "email": "extracted.email@domain.com",
+  "intentAnalysis": "Intent Category",
+  "summary": "1-sentence summary",
+  "tags": ["tag1", "tag2"],
+  "notes": "customer notes",
+  "scoreIncrement": 0
+}
+`;
+
+            const completion = await this.openai.chat.completions.create({
+                model: "gpt-4o-mini",
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.1,
+                max_tokens: 350
+            });
+
+            const content = completion.choices[0].message.content.trim();
+            console.log(`🧠 [AI LEAD ANALYSIS RESULT]`, content);
+            
+            // Clean markdown code blocks if the model returned them despite instructions
+            const cleanJson = content.replace(/^```json/i, '').replace(/```$/, '').trim();
+            return JSON.parse(cleanJson);
+        } catch (err) {
+            console.error('❌ [AI LEAD ANALYSIS ERROR]', err.message);
+            return null;
+        }
+    }
+
     getClientFiles(clientId) {
         const clientPath = this.getClientFolderPath(clientId);
         if (!fs.existsSync(clientPath)) return [];

@@ -73,6 +73,37 @@ async function validateAndFetchStructure(spreadsheetUrlOrId) {
 /**
  * Syncs a single CRM row/lead to a Google Sheet based on connection configuration
  */
+function formatLeadData(lead) {
+    const lastMsg = lead.messages && lead.messages.length > 0 ? lead.messages.filter(m => m.sender === 'customer').pop()?.text : '';
+    const botMsg = lead.messages && lead.messages.length > 0 ? lead.messages.filter(m => m.sender === 'bot').pop()?.text : '';
+    
+    return {
+        phone: lead.phone || lead.customerPhone || '',
+        name: lead.name || lead.customerPhone || '',
+        email: lead.email || '',
+        status: lead.status || (lead.botPaused ? 'paused' : 'active'),
+        interestScore: lead.interestScore !== undefined ? lead.interestScore : 0,
+        lastMessage: lead.lastMessage || lastMsg || '',
+        botReply: lead.botReply || botMsg || '',
+        campaignSource: lead.campaignSource || '',
+        assignedAgent: lead.assignedAgent || (lead.botPaused ? 'Agent' : 'Bot'),
+        followUpStatus: lead.followUpStatus || 'pending',
+        reminderStatus: lead.reminderStatus || 'none',
+        lastActiveTime: lead.lastActiveTime || (lead.lastUpdate ? new Date(lead.lastUpdate).toISOString() : ''),
+        leadCreatedTime: lead.leadCreatedTime || (lead.createdAt ? new Date(lead.createdAt).toISOString() : ''),
+        tags: Array.isArray(lead.tags) ? lead.tags.join(', ') : (lead.tags || ''),
+        summary: lead.summary || '',
+        intentAnalysis: lead.intentAnalysis || 'Pending',
+        conversionStatus: lead.conversionStatus || 'not_converted',
+        messageCount: lead.messageCount !== undefined ? lead.messageCount : (lead.messages ? lead.messages.length : 0),
+        language: lead.language || 'English',
+        notes: lead.notes || ''
+    };
+}
+
+/**
+ * Syncs a single CRM row/lead to a Google Sheet based on connection configuration
+ */
 async function syncRow(connection, leadData) {
     const { spreadsheetId, tabName, rowBehavior, filters } = connection;
     let mappings = (connection.mappings instanceof Map)
@@ -93,17 +124,19 @@ async function syncRow(connection, leadData) {
     }
     const sheets = google.sheets({ version: 'v4', auth });
 
+    const crmData = formatLeadData(leadData);
+
     // 1. Evaluate Filters
     if (filters && filters.length > 0) {
         const matchesAll = filters.every(f => {
-            const val = (leadData[f.field] || "").toString().toLowerCase();
+            const val = (crmData[f.field] || "").toString().toLowerCase();
             const filterVal = (f.value || "").toString().toLowerCase();
             if (f.operator === 'equals') return val === filterVal;
             if (f.operator === 'contains') return val.includes(filterVal);
             return false;
         });
         if (!matchesAll) {
-            console.log(`⏭️ [SYNC FILTER] Lead ${leadData.phone || leadData.customerPhone} did not pass sheet filters. Skipping.`);
+            console.log(`⏭️ [SYNC FILTER] Lead ${crmData.phone} did not pass sheet filters. Skipping.`);
             return false;
         }
     }
@@ -127,21 +160,12 @@ async function syncRow(connection, leadData) {
 
         // 3. Map lead data to header columns
         const newRow = Array(headers.length).fill('');
-        
-        // Supported lead keys: name, phone, status, lastMessage, assignedAgent
-        const crmData = {
-            name: leadData.name || leadData.customerPhone || '',
-            phone: leadData.phone || leadData.customerPhone || '',
-            status: leadData.status || 'open',
-            lastMessage: leadData.lastMessage || leadData.text || '',
-            assignedAgent: leadData.assignedAgent || 'Unassigned'
-        };
 
         // Fill columns matching mapped headers
         for (const [crmField, sheetColName] of Object.entries(mappings)) {
             const colIndex = headers.indexOf(sheetColName);
             if (colIndex !== -1) {
-                newRow[colIndex] = crmData[crmField] || '';
+                newRow[colIndex] = crmData[crmField] !== undefined ? crmData[crmField] : '';
             }
         }
 
@@ -285,18 +309,12 @@ async function exportLeadsToSheet(connection, crmLeads) {
         // Format lead data
         for (const lead of crmLeads) {
             const row = Array(headers.length).fill('');
-            const crmData = {
-                name: lead.name || lead.customerPhone || '',
-                phone: lead.phone || lead.customerPhone || '',
-                status: lead.status || 'open',
-                lastMessage: lead.lastMessage || lead.text || '',
-                assignedAgent: lead.assignedAgent || 'Unassigned'
-            };
+            const crmData = formatLeadData(lead);
 
             for (const [crmField, sheetColName] of Object.entries(mappings)) {
                 const colIndex = headers.indexOf(sheetColName);
                 if (colIndex !== -1) {
-                    row[colIndex] = crmData[crmField] || '';
+                    row[colIndex] = crmData[crmField] !== undefined ? crmData[crmField] : '';
                 }
             }
             values.push(row);

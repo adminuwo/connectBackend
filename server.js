@@ -556,18 +556,9 @@ async function triggerRealtimeSync(clientId, chat) {
         const activeConnections = await GoogleSheet.find({ clientId, isActive: true, 'syncSettings.mode': 'realtime' });
         if (!activeConnections || activeConnections.length === 0) return;
 
-        const lastMsg = chat.messages[chat.messages.length - 1];
-        const leadData = {
-            name: chat.customerPhone,
-            phone: chat.customerPhone,
-            status: chat.botPaused ? 'paused' : 'active',
-            lastMessage: lastMsg ? lastMsg.text : '',
-            assignedAgent: chat.botPaused ? 'Agent' : 'Bot'
-        };
-
         for (const conn of activeConnections) {
             try {
-                const success = await sheetsHelper.syncRow(conn, leadData);
+                const success = await sheetsHelper.syncRow(conn, chat);
                 if (success) {
                     await GoogleSheet.findByIdAndUpdate(conn._id || conn.id, {
                         lastSyncAt: new Date(),
@@ -1272,6 +1263,8 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                                     msgType: 'text',
                                     timestamp: new Date()
                                 });
+                                activeChat.handoverActive = true;
+                                activeChat.handoverExpiresAt = new Date(Date.now() + 5 * 60000);
                                 activeChat.lastUpdate = new Date();
                                 await activeChat.save();
                                 triggerRealtimeSync(id, activeChat);
@@ -1334,6 +1327,8 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                             mediaUrl: (mediaList && mediaList.length > 0) ? mediaList[0].url : '',
                             timestamp: new Date()
                         });
+                        activeChat.handoverActive = true;
+                        activeChat.handoverExpiresAt = new Date(Date.now() + 5 * 60000);
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
                         triggerRealtimeSync(id, activeChat);
@@ -1453,11 +1448,11 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 lastBotMessages.set(key, { text: sentText, source: 'workflow', time: Date.now() });
 
                 // CHECK: Is this a handover message (workflow triggering the bot)?
-                const triggerKeywords = client.botTriggerKeywords || [];
-                const isHandoverTrigger = triggerKeywords.length > 0 && triggerKeywords.some(k => sentText.toLowerCase().includes(k.toLowerCase()));
+                // Always trigger and prime the bot session when the workflow/admin/bot sends a message!
+                const isHandoverTrigger = true;
 
                 if (isHandoverTrigger) {
-                    console.log(`🚀 [HANDOVER DETECTED] Workflow sent a trigger: "${sentText.substring(0, 30)}...". Triggering AI reply...`);
+                    console.log(`🚀 [BOT ACTIVATED] Outgoing message detected. Priming AI session...`);
                     
                     const fiveMinutesFromNow = new Date(Date.now() + 5 * 60000);
                     let activeChat = await Chat.findOne({ clientId, customerPhone });
@@ -1546,6 +1541,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                     console.log(`✅ [INTERAKT SUCCESS] Instant welcome image sent to ${customerPhone}`);
                                 }
                                 
+                                activeChat.botReply = response || (imageUrl ? 'Generated Image' : '');
                                 activeChat.lastUpdate = new Date();
                                 await activeChat.save();
                                 triggerRealtimeSync(clientId, activeChat);
@@ -1846,6 +1842,53 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             await activeChat.save(); // Save immediately so dashboard shows the message
             triggerRealtimeSync(clientId, activeChat);
 
+            // Run AI Lead Analysis asynchronously in the background so it doesn't delay dashboard delivery
+            if (openai) {
+                (async () => {
+                    try {
+                        const analysis = await rag.analyzeLeadWithAI(activeChat.messages);
+                        if (analysis) {
+                            // Re-fetch chat to ensure no race conditions
+                            const currentChat = await Chat.findOne({ clientId, customerPhone }) || activeChat;
+                            currentChat.language = analysis.language || currentChat.language || 'English';
+                            if (analysis.email) currentChat.email = analysis.email;
+                            currentChat.intentAnalysis = analysis.intentAnalysis || currentChat.intentAnalysis || 'Pending';
+                            currentChat.summary = analysis.summary || currentChat.summary || '';
+                            
+                            if (analysis.tags && analysis.tags.length > 0) {
+                                const newTags = new Set([...(currentChat.tags || []), ...analysis.tags]);
+                                currentChat.tags = Array.from(newTags);
+                            }
+                            
+                            if (analysis.notes) {
+                                currentChat.notes = analysis.notes;
+                            }
+                            
+                            const scoreIncrement = Number(analysis.scoreIncrement) || 0;
+                            if (scoreIncrement > 0) {
+                                currentChat.interestScore = Math.min(100, (currentChat.interestScore || 0) + scoreIncrement);
+                            }
+                            
+                            // Promote if score is high
+                            if (currentChat.interestScore >= 70) {
+                                currentChat.intentAnalysis = 'Hot';
+                                currentChat.conversionStatus = 'converted';
+                            }
+                            
+                            currentChat.messageCount = currentChat.messages ? currentChat.messages.length : 0;
+                            
+                            await currentChat.save();
+                            console.log(`🧠 [AI LEAD SYNC] Successfully updated CRM lead data for ${customerPhone}`);
+                            
+                            // Trigger a sheet sync with the updated chat containing the newly analyzed fields!
+                            await triggerRealtimeSync(clientId, currentChat);
+                        }
+                    } catch (analysisErr) {
+                        console.error('❌ [AI LEAD SYNC ERROR]', analysisErr.message);
+                    }
+                })();
+            }
+
             // --- BACKGROUND SAVE + AI PROCESS ---
             // Re-check session status here for final decision
             const isBotSessionActiveFinal = activeChat && activeChat.handoverActive && activeChat.handoverExpiresAt && new Date(activeChat.handoverExpiresAt) > new Date();
@@ -1960,6 +2003,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         // Mark the state as 'ai'
                         lastBotMessages.set(key, { text: response || "Image", source: 'ai', time: Date.now() });
 
+                        activeChat.botReply = response || (imageUrl ? 'Generated Image' : '');
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
                         triggerRealtimeSync(clientId, activeChat);
@@ -2178,6 +2222,8 @@ app.post('/api/client/:id/bulk-send-v2', authenticateToken, async (req, res) => 
                         mediaUrl: (mediaList && mediaList.length > 0) ? mediaList[0].url : '',
                         timestamp: new Date()
                     });
+                    activeChat.handoverActive = true;
+                    activeChat.handoverExpiresAt = new Date(Date.now() + 5 * 60000);
                     activeChat.lastUpdate = new Date();
                     await activeChat.save();
                     triggerRealtimeSync(clientId, activeChat);
@@ -2358,6 +2404,8 @@ setInterval(async () => {
                             mediaUrl: reminder.mediaUrl || '',
                             timestamp: new Date()
                         });
+                        activeChat.handoverActive = true;
+                        activeChat.handoverExpiresAt = new Date(Date.now() + 5 * 60000);
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
                         triggerRealtimeSync(state.clientId, activeChat);
