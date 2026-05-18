@@ -1140,15 +1140,13 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
         const client = await Client.findById(clientId);
         if (!client) return res.status(404).json({ error: 'Client not found' });
 
-        // Normalize phone: Remove '+' and whitespace
-        const customerPhoneNorm = customerPhone.toString().trim().replace(/\+/g, '');
-
+        // Normalize phone: Keep the '+' prefix for MongoDB consistency
         await Chat.findOneAndUpdate(
-            { clientId, customerPhone: customerPhoneNorm },
+            { clientId, customerPhone: customerPhone },
             { botPaused: !isBotActive },
             { upsert: true }
         );
-        console.log(`🤝 [HANDOVER] Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhoneNorm}`);
+        console.log(`🤝 [HANDOVER] Bot is now ${isBotActive ? 'ACTIVE' : 'PAUSED'} for ${customerPhone}`);
 
         // If activating, send an immediate "Welcome/Assistant" message
         if (isBotActive && openai) {
