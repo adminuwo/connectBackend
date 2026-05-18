@@ -74,7 +74,12 @@ async function validateAndFetchStructure(spreadsheetUrlOrId) {
  * Syncs a single CRM row/lead to a Google Sheet based on connection configuration
  */
 async function syncRow(connection, leadData) {
-    const { spreadsheetId, tabName, mappings, rowBehavior, filters } = connection;
+    const { spreadsheetId, tabName, rowBehavior, filters } = connection;
+    const mappings = (connection.mappings instanceof Map)
+        ? Object.fromEntries(connection.mappings)
+        : (connection.mappings && typeof connection.mappings.toObject === 'function')
+            ? connection.mappings.toObject()
+            : (connection.mappings || {});
     const sheets = google.sheets({ version: 'v4', auth });
 
     // 1. Evaluate Filters
@@ -185,7 +190,12 @@ async function syncRow(connection, leadData) {
  * Imports leads from a Google Sheet into CRM database (or chats history)
  */
 async function importLeadsFromSheet(connection, saveLeadCallback) {
-    const { spreadsheetId, tabName, mappings } = connection;
+    const { spreadsheetId, tabName } = connection;
+    const mappings = (connection.mappings instanceof Map)
+        ? Object.fromEntries(connection.mappings)
+        : (connection.mappings && typeof connection.mappings.toObject === 'function')
+            ? connection.mappings.toObject()
+            : (connection.mappings || {});
     const sheets = google.sheets({ version: 'v4', auth });
 
     try {
@@ -226,7 +236,12 @@ async function importLeadsFromSheet(connection, saveLeadCallback) {
  * Exports all existing CRM leads/chats to a Google Sheet
  */
 async function exportLeadsToSheet(connection, crmLeads) {
-    const { spreadsheetId, tabName, mappings } = connection;
+    const { spreadsheetId, tabName } = connection;
+    const mappings = (connection.mappings instanceof Map)
+        ? Object.fromEntries(connection.mappings)
+        : (connection.mappings && typeof connection.mappings.toObject === 'function')
+            ? connection.mappings.toObject()
+            : (connection.mappings || {});
     const sheets = google.sheets({ version: 'v4', auth });
 
     try {
