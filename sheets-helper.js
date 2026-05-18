@@ -75,11 +75,22 @@ async function validateAndFetchStructure(spreadsheetUrlOrId) {
  */
 async function syncRow(connection, leadData) {
     const { spreadsheetId, tabName, rowBehavior, filters } = connection;
-    const mappings = (connection.mappings instanceof Map)
+    let mappings = (connection.mappings instanceof Map)
         ? Object.fromEntries(connection.mappings)
         : (connection.mappings && typeof connection.mappings.toObject === 'function')
             ? connection.mappings.toObject()
             : (connection.mappings || {});
+
+    // Fallback: If mappings are empty, provide standard default columns
+    if (Object.keys(mappings).length === 0) {
+        mappings = {
+            phone: 'Phone Number',
+            name: 'Name',
+            status: 'Status',
+            lastMessage: 'Last Message',
+            assignedAgent: 'Assigned Agent'
+        };
+    }
     const sheets = google.sheets({ version: 'v4', auth });
 
     // 1. Evaluate Filters
@@ -191,11 +202,22 @@ async function syncRow(connection, leadData) {
  */
 async function importLeadsFromSheet(connection, saveLeadCallback) {
     const { spreadsheetId, tabName } = connection;
-    const mappings = (connection.mappings instanceof Map)
+    let mappings = (connection.mappings instanceof Map)
         ? Object.fromEntries(connection.mappings)
         : (connection.mappings && typeof connection.mappings.toObject === 'function')
             ? connection.mappings.toObject()
             : (connection.mappings || {});
+
+    // Fallback: If mappings are empty, provide standard default columns
+    if (Object.keys(mappings).length === 0) {
+        mappings = {
+            phone: 'Phone Number',
+            name: 'Name',
+            status: 'Status',
+            lastMessage: 'Last Message',
+            assignedAgent: 'Assigned Agent'
+        };
+    }
     const sheets = google.sheets({ version: 'v4', auth });
 
     try {
@@ -237,11 +259,22 @@ async function importLeadsFromSheet(connection, saveLeadCallback) {
  */
 async function exportLeadsToSheet(connection, crmLeads) {
     const { spreadsheetId, tabName } = connection;
-    const mappings = (connection.mappings instanceof Map)
+    let mappings = (connection.mappings instanceof Map)
         ? Object.fromEntries(connection.mappings)
         : (connection.mappings && typeof connection.mappings.toObject === 'function')
             ? connection.mappings.toObject()
             : (connection.mappings || {});
+
+    // Fallback: If mappings are empty, provide standard default columns
+    if (Object.keys(mappings).length === 0) {
+        mappings = {
+            phone: 'Phone Number',
+            name: 'Name',
+            status: 'Status',
+            lastMessage: 'Last Message',
+            assignedAgent: 'Assigned Agent'
+        };
+    }
     const sheets = google.sheets({ version: 'v4', auth });
 
     try {
