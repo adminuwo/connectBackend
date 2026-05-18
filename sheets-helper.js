@@ -1,6 +1,7 @@
 const { google } = require('googleapis');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
 
 let auth;
 const keyPath = process.env.GCP_KEY_FILE_PATH ? path.join(__dirname, process.env.GCP_KEY_FILE_PATH) : null;
@@ -269,10 +270,41 @@ async function exportLeadsToSheet(connection, crmLeads) {
     }
 }
 
+async function getServiceAccountEmail() {
+    // 1. Try Key File directly
+    try {
+        if (keyPath && fs.existsSync(keyPath)) {
+            const keyData = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+            if (keyData.client_email) return keyData.client_email;
+        }
+    } catch (e) {}
+
+    // 2. Try GCP Metadata Server (if running on Cloud Run)
+    try {
+        const res = await axios.get('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email', {
+            headers: { 'Metadata-Flavor': 'Google' },
+            timeout: 1000
+        });
+        if (res.data) return res.data.trim();
+    } catch (e) {}
+
+    // 3. Try Fallback to ADC client credentials
+    try {
+        const client = await auth.getClient();
+        if (client.credentials && client.credentials.client_email) {
+            return client.credentials.client_email;
+        }
+    } catch (e) {}
+
+    // 4. Ultimate guess fallback
+    return 'aisacoonect@ai-mall-484810.iam.gserviceaccount.com';
+}
+
 module.exports = {
     extractSpreadsheetId,
     validateAndFetchStructure,
     syncRow,
     importLeadsFromSheet,
-    exportLeadsToSheet
+    exportLeadsToSheet,
+    getServiceAccountEmail
 };

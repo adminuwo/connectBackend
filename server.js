@@ -602,6 +602,17 @@ app.get('/api/client/:id/sheets', authenticateToken, async (req, res) => {
     }
 });
 
+// 1b. Get Sheets Service Account Email
+app.get('/api/client/:id/sheets/service-account', authenticateToken, async (req, res) => {
+    try {
+        const email = await sheetsHelper.getServiceAccountEmail();
+        res.json({ email });
+    } catch (err) {
+        console.error('❌ [GET SHEETS SA ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // 2. Validate Google Sheet URL
 app.post('/api/client/:id/sheets/validate', authenticateToken, async (req, res) => {
     try {
