@@ -1573,6 +1573,21 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             text = message.list_reply.title || "";
         } else {
             text = (message.text || message.message || "").trim();
+            // Fallback: If Interakt sends the button_reply payload as a serialized JSON string in message.text
+            if (text.startsWith('{') && text.endsWith('}')) {
+                try {
+                    const parsed = JSON.parse(text);
+                    if (parsed.button_reply && parsed.button_reply.title) {
+                        text = parsed.button_reply.title;
+                    } else if (parsed.list_reply && parsed.list_reply.title) {
+                        text = parsed.list_reply.title;
+                    } else if (parsed.text) {
+                        text = parsed.text;
+                    }
+                } catch (e) {
+                    // Fail-safe: keep original text if JSON is invalid
+                }
+            }
         }
         
         msgType = message.type || (message.button_reply ? "button_reply" : "Text");
