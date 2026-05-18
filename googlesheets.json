@@ -1,0 +1,30 @@
+[
+  {
+    "createdAt": "2026-05-18T07:41:25.144Z",
+    "clientId": "1778218801097",
+    "name": "Google Sheets Connection",
+    "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1H3nTY3CAyRH9mv4Xest46Ic3FGuiyMHCwmPSzjJrOMY/edit?usp=sharing",
+    "spreadsheetId": "1H3nTY3CAyRH9mv4Xest46Ic3FGuiyMHCwmPSzjJrOMY",
+    "tabName": "UWO",
+    "columns": [
+      "whatsapp ",
+      "calling "
+    ],
+    "mappings": {
+      "phone": "whatsapp ",
+      "name": "whatsapp "
+    },
+    "rowBehavior": "updateExisting",
+    "filters": [],
+    "syncSettings": {
+      "mode": "realtime",
+      "interval": "5mins"
+    },
+    "isActive": true,
+    "_id": "1779090085144",
+    "lastSyncAt": "2026-05-18T07:47:04.516Z",
+    "$inc": {
+      "totalRowsSynced": 1
+    }
+  }
+]

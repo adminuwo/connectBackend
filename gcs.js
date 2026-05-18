@@ -41,7 +41,7 @@ async function uploadToBucket(clientId, fileName, fileContent) {
         console.log('🚫 [GCS] Bucket not active. Skipping upload.');
         return null;
     }
-    
+
     const destFileName = `${clientId}/${fileName}`;
     const file = bucket.file(destFileName);
 
@@ -55,14 +55,14 @@ async function uploadToBucket(clientId, fileName, fileContent) {
             // Assume it's a Buffer or direct content
             await file.save(fileContent);
         }
-        
+
         // Make the file public so Interakt/WhatsApp can access it
         try {
             await file.makePublic();
         } catch (pubErr) {
             console.warn(`⚠️ [GCS] Could not make ${fileName} public. Ensure bucket permissions allow it.`);
         }
-        
+
         console.log(`✅ [GCS] File uploaded to: ${destFileName}`);
         return `https://storage.googleapis.com/${bucketName}/${destFileName}`;
     } catch (err) {
@@ -80,7 +80,7 @@ async function deleteFromBucket(clientId, fileName) {
         // 1. Try strict path
         const strictPath = `${clientId}/${fileName}`;
         const [exists] = await bucket.file(strictPath).exists();
-        
+
         if (exists) {
             await bucket.file(strictPath).delete();
             console.log(`🗑️ [GCS] File deleted (strict): ${strictPath}`);
@@ -113,7 +113,7 @@ async function listClientFiles(clientId) {
     try {
         // 1. Try strict ID-only prefix
         let [files] = await bucket.getFiles({ prefix: `${clientId}/` });
-        
+
         // 2. If nothing found, try legacy search (ANY folder that ends with _clientId)
         if (files.length === 0) {
             console.log(`[GCS] No files with strict ID prefix. Trying legacy suffix search for: *_${clientId}/`);
@@ -162,7 +162,7 @@ async function downloadFromBucket(clientId, fileName, localPath) {
                 throw new Error(`File ${fileName} not found in any folder for client ${clientId}`);
             }
         }
-        
+
         await bucket.file(remoteFilePath).download({ destination: localPath });
         console.log(`📥 [GCS] Downloaded: ${remoteFilePath} -> ${localPath}`);
     } catch (err) {

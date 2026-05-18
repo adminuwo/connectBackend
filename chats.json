@@ -21,5 +21,39 @@
     "clientId": "1778218801097",
     "customerPhone": "+918359890909",
     "_id": "1778660451655"
+  },
+  {
+    "createdAt": "2026-05-18T07:47:04.705Z",
+    "messages": [
+      {
+        "sender": "workflow",
+        "text": "Imported from Google Sheet: abha (desktop)",
+        "msgType": "text",
+        "timestamp": "2026-05-18T07:47:04.703Z"
+      }
+    ],
+    "status": "open",
+    "lastUpdate": "2026-05-18T07:47:04.703Z",
+    "botPaused": false,
+    "clientId": "1778218801097",
+    "customerPhone": "+abha (desktop)",
+    "_id": "1779090424705"
+  },
+  {
+    "createdAt": "2026-05-18T07:47:04.748Z",
+    "messages": [
+      {
+        "sender": "workflow",
+        "text": "Imported from Google Sheet: gagan (desktop)",
+        "msgType": "text",
+        "timestamp": "2026-05-18T07:47:04.748Z"
+      }
+    ],
+    "status": "open",
+    "lastUpdate": "2026-05-18T07:47:04.748Z",
+    "botPaused": false,
+    "clientId": "1778218801097",
+    "customerPhone": "+gagan (desktop)",
+    "_id": "1779090424748"
   }
 ]

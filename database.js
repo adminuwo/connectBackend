@@ -129,6 +129,31 @@ const OTPSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now, expires: 600 }
 });
 
+const GoogleSheetSchema = new mongoose.Schema({
+    clientId: { type: String, required: true },
+    name: { type: String, default: 'Untitled Sheet' },
+    spreadsheetId: { type: String, required: true },
+    spreadsheetUrl: { type: String, required: true },
+    tabName: { type: String, default: 'Sheet1' },
+    columns: { type: [String], default: [] },
+    mappings: { type: Map, of: String, default: {} }, // CRM field -> Sheet column
+    rowBehavior: { type: String, default: 'addNew' }, // addNew, updateExisting, append, replace
+    filters: [{
+        field: { type: String },
+        operator: { type: String },
+        value: { type: String }
+    }],
+    syncSettings: {
+        mode: { type: String, default: 'realtime' }, // realtime, manual, scheduled
+        interval: { type: String, default: '5mins' } // 5mins, hourly, daily
+    },
+    isActive: { type: Boolean, default: true },
+    lastSyncAt: { type: Date },
+    totalRowsSynced: { type: Number, default: 0 },
+    failedSyncsCount: { type: Number, default: 0 },
+    createdAt: { type: Date, default: Date.now }
+});
+
 const MongooseClient = mongoose.model('Client', ClientSchema);
 const MongooseTicket = mongoose.model('Ticket', TicketSchema);
 const MongooseChat = mongoose.model('Chat', ChatSchema);
@@ -136,6 +161,7 @@ const MongooseCampaign = mongoose.model('Campaign', CampaignSchema);
 const MongooseAutomation = mongoose.model('Automation', AutomationFlowSchema);
 const MongooseAutoState = mongoose.model('AutomationState', AutomationStateSchema);
 const MongooseOTP = mongoose.model('OTP', OTPSchema);
+const MongooseGoogleSheet = mongoose.model('GoogleSheet', GoogleSheetSchema);
 
 // --- MOCK MODELS (For JSON) ---
 class MockModel {
@@ -282,6 +308,7 @@ const JsonCampaign = new MockModel('campaigns.json', 'Campaign');
 const JsonAutomation = new MockModel('automations.json', 'Automation');
 const JsonAutoState = new MockModel('autostates.json', 'AutomationState');
 const JsonOTP = new MockModel('otps.json', 'OTP');
+const JsonGoogleSheet = new MockModel('googlesheets.json', 'GoogleSheet');
 
 const createConstructorProxy = (mockInstance) => {
     function MockConstructor(data) {
@@ -335,6 +362,7 @@ const CampaignModel = createConstructorProxy(JsonCampaign);
 const AutomationModel = createConstructorProxy(JsonAutomation);
 const AutoStateModel = createConstructorProxy(JsonAutoState);
 const OTPModel = createConstructorProxy(JsonOTP);
+const GoogleSheetModel = createConstructorProxy(JsonGoogleSheet);
 
 module.exports = { 
     connectDB,
@@ -345,5 +373,6 @@ module.exports = {
     get Automation() { return dbMode === 'atlas' ? MongooseAutomation : AutomationModel; },
     get AutoState() { return dbMode === 'atlas' ? MongooseAutoState : AutoStateModel; },
     get OTP() { return dbMode === 'atlas' ? MongooseOTP : OTPModel; },
+    get GoogleSheet() { return dbMode === 'atlas' ? MongooseGoogleSheet : GoogleSheetModel; },
     isLocal: () => dbMode === 'json'
 };

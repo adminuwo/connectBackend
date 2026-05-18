@@ -70,11 +70,12 @@ console.log(`🤖 [AI STATUS] OpenAI Initialized: ${!!openai} (${process.env.OPE
 const SimpleRAG = require('./rag');
 const rag = new SimpleRAG(openai);
 const gcs = require('./gcs');
+const sheetsHelper = require('./sheets-helper');
 
 console.log(`☁️ [GCS STATUS] GCS Active: ${gcs.isGcsActive}`);
 
 // Import database
-const { Client, Ticket, Chat, OTP, Campaign, Automation, AutoState, isLocal } = require('./database');
+const { Client, Ticket, Chat, OTP, Campaign, Automation, AutoState, GoogleSheet, isLocal } = require('./database');
 
 app.use(cors({
     origin: '*',
@@ -432,6 +433,33 @@ app.post('/api/client/:id/upload-logo', authenticateToken, logoUpload.single('lo
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// --- SECURE MEDIA PROXY ---
+// Streams files from the private GCS bucket without needing public permissions
+app.get('/api/media/:clientId/:fileName', async (req, res) => {
+    try {
+        const { clientId, fileName } = req.params;
+        if (gcs.isGcsActive) {
+            const file = gcs.bucket.file(`${clientId}/${fileName}`);
+            const [exists] = await file.exists();
+            if (exists) {
+                const [metadata] = await file.getMetadata();
+                if (metadata.contentType) res.setHeader('Content-Type', metadata.contentType);
+                return file.createReadStream().pipe(res);
+            }
+        }
+        
+        // Fallback to local file if GCS is inactive or file not found in GCS
+        const localPath = path.join(__dirname, 'uploads', clientId, fileName);
+        if (fs.existsSync(localPath)) {
+            return res.sendFile(localPath);
+        }
+        
+        res.status(404).json({ error: 'Media not found' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/api/client/:id/upload-media', authenticateToken, upload.array('files'), async (req, res) => {
     try {
         const urls = [];
@@ -445,12 +473,8 @@ app.post('/api/client/:id/upload-media', authenticateToken, upload.array('files'
                 await gcs.uploadToBucket(req.params.id, fileName, file.path);
             }
             
-            let publicUrl = `${baseUrl}/uploads/${req.params.id}/${fileName}`;
-            if (gcs.isGcsActive) {
-                const gcsUrl = await gcs.getPublicUrl(req.params.id, fileName);
-                if (gcsUrl) publicUrl = gcsUrl;
-            }
-            
+            // Use secure streaming proxy URL to avoid GCS public access requirements
+            let publicUrl = `${baseUrl}/api/media/${req.params.id}/${fileName}`;
             publicUrl = encodeURI(publicUrl);
             
             urls.push({
@@ -524,6 +548,291 @@ app.delete('/api/client/:id/chats/:phone', authenticateToken, async (req, res) =
         await Chat.deleteOne({ clientId: req.params.id, customerPhone: req.params.phone });
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Helper for Real-time Google Sheet Syncing
+async function triggerRealtimeSync(clientId, chat) {
+    try {
+        const activeConnections = await GoogleSheet.find({ clientId, isActive: true, 'syncSettings.mode': 'realtime' });
+        if (!activeConnections || activeConnections.length === 0) return;
+
+        const lastMsg = chat.messages[chat.messages.length - 1];
+        const leadData = {
+            name: chat.customerPhone,
+            phone: chat.customerPhone,
+            status: chat.botPaused ? 'paused' : 'active',
+            lastMessage: lastMsg ? lastMsg.text : '',
+            assignedAgent: chat.botPaused ? 'Agent' : 'Bot'
+        };
+
+        for (const conn of activeConnections) {
+            try {
+                const success = await sheetsHelper.syncRow(conn, leadData);
+                if (success) {
+                    await GoogleSheet.findByIdAndUpdate(conn._id || conn.id, {
+                        lastSyncAt: new Date(),
+                        $inc: { totalRowsSynced: 1 }
+                    });
+                    console.log(`⚡ [REALTIME SHEET SYNCED] Sheet: ${conn.name} for phone: ${chat.customerPhone}`);
+                }
+            } catch (syncErr) {
+                console.error(`❌ [REALTIME SYNC ENGINE ERR] Sheet: ${conn.name}`, syncErr.message);
+                await GoogleSheet.findByIdAndUpdate(conn._id || conn.id, {
+                    $inc: { failedSyncsCount: 1 }
+                });
+            }
+        }
+    } catch (err) {
+        console.error('❌ [REALTIME SYNC TRIGGER ERROR]', err.message);
+    }
+}
+
+// ====================
+// GOOGLE SHEETS API
+// ====================
+
+// 1. Get all sheet connections
+app.get('/api/client/:id/sheets', authenticateToken, async (req, res) => {
+    try {
+        const connections = await GoogleSheet.find({ clientId: req.params.id }) || [];
+        res.json(connections);
+    } catch (err) {
+        console.error('❌ [GET SHEETS ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 2. Validate Google Sheet URL
+app.post('/api/client/:id/sheets/validate', authenticateToken, async (req, res) => {
+    try {
+        const { url } = req.body;
+        if (!url) return res.status(400).json({ error: 'Google Sheet URL is required.' });
+
+        const structure = await sheetsHelper.validateAndFetchStructure(url);
+        res.json({
+            success: true,
+            spreadsheetId: structure.spreadsheetId,
+            tabs: structure.tabs,
+            defaultTab: structure.defaultTab,
+            headers: structure.headers
+        });
+    } catch (err) {
+        console.error('❌ [VALIDATE SHEET ERROR]', err.message);
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// 3. Connect/Save Sheet Connection
+app.post('/api/client/:id/sheets', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const { 
+            id, // Connection ID if updating
+            name,
+            spreadsheetUrl,
+            spreadsheetId,
+            tabName,
+            columns,
+            mappings,
+            rowBehavior,
+            filters,
+            syncSettings
+        } = req.body;
+
+        if (!spreadsheetUrl || !spreadsheetId) {
+            return res.status(400).json({ error: 'Spreadsheet URL and ID are required.' });
+        }
+
+        let connection;
+        if (id) {
+            // Update
+            connection = await GoogleSheet.findOneAndUpdate(
+                { _id: id, clientId },
+                { 
+                    name: name || 'Google Sheet Connection',
+                    spreadsheetUrl,
+                    spreadsheetId,
+                    tabName,
+                    columns,
+                    mappings,
+                    rowBehavior: rowBehavior || 'addNew',
+                    filters: filters || [],
+                    syncSettings: syncSettings || { mode: 'realtime', interval: '5mins' }
+                },
+                { new: true }
+            );
+        } else {
+            // Create
+            connection = new GoogleSheet({
+                clientId,
+                name: name || 'Google Sheet Connection',
+                spreadsheetUrl,
+                spreadsheetId,
+                tabName,
+                columns: columns || [],
+                mappings: mappings || {},
+                rowBehavior: rowBehavior || 'addNew',
+                filters: filters || [],
+                syncSettings: syncSettings || { mode: 'realtime', interval: '5mins' },
+                isActive: true
+            });
+            await connection.save();
+        }
+
+        res.json({ success: true, connection });
+    } catch (err) {
+        console.error('❌ [CONNECT SHEET ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 4. Toggle Sheet Connection (Active/Inactive)
+app.post('/api/client/:id/sheets/:sheetId/toggle', authenticateToken, async (req, res) => {
+    try {
+        const { sheetId, id: clientId } = req.params;
+        const { isActive } = req.body;
+
+        const connection = await GoogleSheet.findOneAndUpdate(
+            { _id: sheetId, clientId },
+            { isActive },
+            { new: true }
+        );
+
+        if (!connection) return res.status(404).json({ error: 'Sheet connection not found.' });
+        res.json({ success: true, connection });
+    } catch (err) {
+        console.error('❌ [TOGGLE SHEET ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 5. Delete Sheet Connection
+app.delete('/api/client/:id/sheets/:sheetId', authenticateToken, async (req, res) => {
+    try {
+        const { sheetId, id: clientId } = req.params;
+        const result = await GoogleSheet.deleteOne({ _id: sheetId, clientId });
+        
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ error: 'Sheet connection not found.' });
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('❌ [DELETE SHEET ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 6. Manual Sync Lead Data to Sheet (Push CRM data)
+app.post('/api/client/:id/sheets/:sheetId/sync', authenticateToken, async (req, res) => {
+    try {
+        const { sheetId, id: clientId } = req.params;
+        const connection = await GoogleSheet.findOne({ _id: sheetId, clientId });
+        if (!connection) return res.status(404).json({ error: 'Sheet connection not found.' });
+
+        // Fetch all client chats/leads
+        const chats = await Chat.find({ clientId }) || [];
+        
+        // Loop and sync
+        let syncedCount = 0;
+        for (const chat of chats) {
+            const lastMsg = chat.messages[chat.messages.length - 1];
+            const leadData = {
+                name: chat.customerPhone,
+                phone: chat.customerPhone,
+                status: chat.botPaused ? 'paused' : 'active',
+                lastMessage: lastMsg ? lastMsg.text : '',
+                assignedAgent: chat.botPaused ? 'Agent' : 'Bot'
+            };
+            
+            try {
+                const synced = await sheetsHelper.syncRow(connection, leadData);
+                if (synced) syncedCount++;
+            } catch (rowErr) {
+                console.warn(`[MANUAL SYNC ROW ERROR] Lead: ${chat.customerPhone}`, rowErr.message);
+            }
+        }
+
+        // Update connection stats
+        await GoogleSheet.findByIdAndUpdate(sheetId, {
+            lastSyncAt: new Date(),
+            $inc: { totalRowsSynced: syncedCount }
+        });
+
+        res.json({ success: true, syncedCount });
+    } catch (err) {
+        console.error('❌ [MANUAL SYNC ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 7. Import Leads from Sheet to CRM
+app.post('/api/client/:id/sheets/:sheetId/import', authenticateToken, async (req, res) => {
+    try {
+        const { sheetId, id: clientId } = req.params;
+        const connection = await GoogleSheet.findOne({ _id: sheetId, clientId });
+        if (!connection) return res.status(404).json({ error: 'Sheet connection not found.' });
+
+        const importedCount = await sheetsHelper.importLeadsFromSheet(connection, async (leadData) => {
+            // Save lead into Chat model
+            const phone = leadData.phone.startsWith('+') ? leadData.phone : '+' + leadData.phone;
+            const existingChat = await Chat.findOne({ clientId, customerPhone: phone });
+            
+            if (!existingChat) {
+                const newChat = new Chat({
+                    clientId,
+                    customerPhone: phone,
+                    messages: [{
+                        sender: 'workflow',
+                        text: `Imported from Google Sheet: ${leadData.name || 'No Name'}`,
+                        msgType: 'text',
+                        timestamp: new Date()
+                    }],
+                    lastUpdate: new Date(),
+                    botPaused: false
+                });
+                await newChat.save();
+            }
+        });
+
+        res.json({ success: true, importedCount });
+    } catch (err) {
+        console.error('❌ [IMPORT LEADS API ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 8. Export CRM Chats to Sheet
+app.post('/api/client/:id/sheets/:sheetId/export', authenticateToken, async (req, res) => {
+    try {
+        const { sheetId, id: clientId } = req.params;
+        const connection = await GoogleSheet.findOne({ _id: sheetId, clientId });
+        if (!connection) return res.status(404).json({ error: 'Sheet connection not found.' });
+
+        const chats = await Chat.find({ clientId }) || [];
+        const leadsArray = chats.map(c => {
+            const lastMsg = c.messages[c.messages.length - 1];
+            return {
+                name: c.customerPhone,
+                phone: c.customerPhone,
+                status: c.botPaused ? 'paused' : 'active',
+                lastMessage: lastMsg ? lastMsg.text : '',
+                assignedAgent: c.botPaused ? 'Agent' : 'Bot'
+            };
+        });
+
+        const exportedCount = await sheetsHelper.exportLeadsToSheet(connection, leadsArray);
+
+        // Update stats
+        await GoogleSheet.findByIdAndUpdate(sheetId, {
+            lastSyncAt: new Date(),
+            $inc: { totalRowsSynced: exportedCount }
+        });
+
+        res.json({ success: true, exportedCount });
+    } catch (err) {
+        console.error('❌ [EXPORT LEADS API ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Get the public GCS URL for document preview (used by Google Docs Viewer)
@@ -1064,14 +1373,27 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 try {
                     const chat = await Chat.findOne({ clientId, customerPhone });
                     let activeChat = chat || new Chat({ clientId, customerPhone, messages: [], lastUpdate: new Date() });
-                    activeChat.messages.push({
-                        sender: 'workflow',
-                        text: sentText,
-                        msgType: 'text',
-                        timestamp: new Date()
-                    });
-                    activeChat.lastUpdate = new Date();
-                    await activeChat.save();
+                    
+                    // Prevent duplicate logging of outgoing messages (e.g. AI bot replies that are already logged in-cycle)
+                    const lastMsg = activeChat.messages[activeChat.messages.length - 1];
+                    const isAlreadyLogged = lastMsg && 
+                        (lastMsg.sender === 'bot' || lastMsg.sender === 'workflow') && 
+                        lastMsg.text === sentText &&
+                        (Date.now() - new Date(lastMsg.timestamp || Date.now()).getTime() < 30000);
+
+                    if (!isAlreadyLogged) {
+                        activeChat.messages.push({
+                            sender: 'workflow',
+                            text: sentText,
+                            msgType: 'text',
+                            timestamp: new Date()
+                        });
+                        activeChat.lastUpdate = new Date();
+                        await activeChat.save();
+                        triggerRealtimeSync(clientId, activeChat);
+                    } else {
+                        console.log(`🚫 [DUPLICATE] Outgoing message already logged: "${sentText.substring(0, 30)}..."`);
+                    }
                 } catch (dbErr) {
                     console.error('❌ [DB TRACK ERROR]', dbErr.message);
                 }
@@ -1374,6 +1696,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             });
             activeChat.lastUpdate = new Date();
             await activeChat.save(); // Save immediately so dashboard shows the message
+            triggerRealtimeSync(clientId, activeChat);
 
             // --- BACKGROUND SAVE + AI PROCESS ---
             // Re-check session status here for final decision
@@ -1491,6 +1814,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                         activeChat.lastUpdate = new Date();
                         await activeChat.save();
+                        triggerRealtimeSync(clientId, activeChat);
                         console.log(`💾 [DB SAVE] Chat updated for ${customerPhone}`);
                         console.log(`✅ [BOT COMPLETED] Full cycle done for ${customerPhone}`);
                     } catch (apiErr) {
