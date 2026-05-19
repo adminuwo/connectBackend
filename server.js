@@ -1445,9 +1445,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 // In-memory fallback
                 lastBotMessages.set(key, { text: sentText, source: 'workflow', time: Date.now() });
 
-                // CHECK: Is this a handover message (workflow triggering the bot)?
-                // Always trigger and prime the bot session when the workflow/admin/bot sends a message!
-                const isHandoverTrigger = true;
+                // We should NOT trigger AI session automatically just because an outgoing message was sent.
+                const isHandoverTrigger = false;
 
                 if (isHandoverTrigger) {
                     console.log(`🚀 [BOT ACTIVATED] Outgoing message detected. Priming AI session...`);
@@ -1675,7 +1674,9 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                                     nextReminderIndex: 0,
                                     lastInteractionAt: new Date(),
                                     nextReminderAt: (nextStage.reminders && nextStage.reminders.length > 0)
-                                        ? new Date(Date.now() + (nextStage.reminders[0].delayHours * 3600000))
+                                        ? (nextStage.reminders[0].fixedTime
+                                            ? new Date(nextStage.reminders[0].fixedTime)
+                                            : new Date(Date.now() + ((nextStage.reminders[0].delayHours || 1) * 3600000)))
                                         : null,
                                     status: 'pending'
                                 });
