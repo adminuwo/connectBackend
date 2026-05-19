@@ -1643,7 +1643,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                         : false; // Removed hardcoded 'ask anything' fallback
 
                     // 1. Process Automation Stages First (to advance stage and cancel previous reminders!)
-                    const activeAuto = await AutoState.findOne({ clientId, customerPhone: cleanPhone, status: 'pending' });
+                    const activeAuto = await AutoState.findOne({ clientId, customerPhone: customerPhone, status: 'pending' });
                     if (activeAuto) {
                         const automation = await Automation.findById(activeAuto.automationId);
                         if (automation) {
@@ -2367,12 +2367,11 @@ setInterval(async () => {
                 const automation = await Automation.findById(state.automationId);
                 if (!client || !automation || !automation.isActive) continue;
 
-                // --- GATE: Check if Bot Session is Active ---
                 const chatState = await Chat.findOne({ clientId: state.clientId, customerPhone: state.customerPhone });
                 const isBotSessionActive = chatState && chatState.handoverActive && chatState.handoverExpiresAt && new Date(chatState.handoverExpiresAt) > new Date();
+                // We will NOT skip reminders even if AI bot is active, so they go out exactly on time!
                 if (isBotSessionActive) {
-                    console.log(`🤖 [AUTO-RUN] Skipping ${state.customerPhone} - AI Bot is talking.`);
-                    continue;
+                    console.log(`🤖 [AUTO-RUN] AI Bot is talking, but sending reminder anyway for ${state.customerPhone}`);
                 }
 
                 // Get Current Stage
