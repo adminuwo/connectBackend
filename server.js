@@ -514,12 +514,46 @@ app.get('/api/client/:id/chats', authenticateToken, async (req, res) => {
         const chats = await Chat.find({ clientId: req.params.id }) || [];
         const chatMap = {};
         chats.forEach(c => {
-            chatMap[c.customerPhone] = {
-                phone: c.customerPhone,
-                lastUpdate: c.lastUpdate,
-                botPaused: c.botPaused,
-                messages: c.messages
-            };
+            const rawPhone = (c.customerPhone || '').trim();
+            let normalizedPhone = rawPhone;
+            if (/^\+?[0-9\s\-\(\)]+$/.test(rawPhone)) {
+                normalizedPhone = rawPhone.replace(/\D/g, '');
+            } else {
+                normalizedPhone = rawPhone.startsWith('+') ? rawPhone.slice(1) : rawPhone;
+            }
+            const displayPhone = normalizedPhone.match(/^\d+$/) ? '+' + normalizedPhone : (rawPhone.startsWith('+') ? rawPhone : '+' + rawPhone);
+
+            if (chatMap[normalizedPhone]) {
+                const existing = chatMap[normalizedPhone];
+                // Combine and deduplicate messages
+                const combined = [...(existing.messages || []), ...(c.messages || [])];
+                const seenKeys = new Set();
+                const uniqueMsgs = [];
+                combined.forEach(m => {
+                    const key = `${m.sender}-${m.text}-${m.timestamp}`;
+                    if (!seenKeys.has(key)) {
+                        seenKeys.add(key);
+                        uniqueMsgs.push(m);
+                    }
+                });
+                // Sort messages by timestamp
+                uniqueMsgs.sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+
+                chatMap[normalizedPhone] = {
+                    phone: displayPhone,
+                    lastUpdate: new Date(c.lastUpdate || 0) > new Date(existing.lastUpdate || 0) ? c.lastUpdate : existing.lastUpdate,
+                    botPaused: c.botPaused || existing.botPaused,
+                    messages: uniqueMsgs
+                };
+            } else {
+                const sortedMsgs = [...(c.messages || [])].sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+                chatMap[normalizedPhone] = {
+                    phone: displayPhone,
+                    lastUpdate: c.lastUpdate,
+                    botPaused: c.botPaused,
+                    messages: sortedMsgs
+                };
+            }
         });
         res.json(chatMap);
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -528,32 +562,60 @@ app.get('/api/client/:id/chats', authenticateToken, async (req, res) => {
 app.get('/api/client/:clientId/contacts', authenticateToken, async (req, res) => {
     try {
         const chats = await Chat.find({ clientId: req.params.clientId }) || [];
-        const contacts = chats.map(c => ({
-            phone: c.customerPhone,
-            name: c.name || c.customerPhone,
-            email: c.email || '',
-            interestScore: c.interestScore || 0,
-            status: c.intentAnalysis || 'New',
-            lastMessage: c.messages && c.messages.length > 0 ? c.messages[c.messages.length - 1].text : '',
-            campaignSource: c.campaignSource || '',
-            createdAt: c.messages && c.messages.length > 0 ? c.messages[0].timestamp : c.lastUpdate,
-            lastUpdate: c.lastUpdate,
-            conversionStatus: c.conversionStatus || 'not_converted',
-            tags: c.tags || [],
-            summary: c.summary || '',
-            notes: c.notes || '',
-            messages: c.messages || [],
-            botPaused: c.botPaused || false,
-            handoverActive: c.handoverActive || false,
-            reminderStatus: c.reminderStatus || 'none',
-            followUpStatus: c.followUpStatus || 'pending'
-        }));
+        const contacts = chats.map(c => {
+            const rawPhone = (c.customerPhone || '').trim();
+            let normalizedPhone = rawPhone;
+            if (/^\+?[0-9\s\-\(\)]+$/.test(rawPhone)) {
+                normalizedPhone = rawPhone.replace(/\D/g, '');
+            } else {
+                normalizedPhone = rawPhone.startsWith('+') ? rawPhone.slice(1) : rawPhone;
+            }
+            const displayPhone = normalizedPhone.match(/^\d+$/) ? '+' + normalizedPhone : (rawPhone.startsWith('+') ? rawPhone : '+' + rawPhone);
 
-        // Remove duplicates
-        const uniqueContacts = Array.from(new Set(contacts.map(c => c.phone)))
-            .map(phone => contacts.find(c => c.phone === phone));
+            return {
+                phone: normalizedPhone,
+                displayPhone: displayPhone,
+                name: c.name || displayPhone,
+                email: c.email || '',
+                interestScore: c.interestScore || 0,
+                status: c.intentAnalysis || 'New',
+                lastMessage: c.messages && c.messages.length > 0 ? c.messages[c.messages.length - 1].text : '',
+                campaignSource: c.campaignSource || '',
+                createdAt: c.createdAt || (c.messages && c.messages.length > 0 ? c.messages[0].timestamp : c.lastUpdate),
+                lastUpdate: c.lastUpdate,
+                conversionStatus: c.conversionStatus || 'not_converted',
+                tags: c.tags || [],
+                summary: c.summary || '',
+                notes: c.notes || '',
+                messages: c.messages || [],
+                botPaused: c.botPaused || false,
+                handoverActive: c.handoverActive || false,
+                reminderStatus: c.reminderStatus || 'none',
+                followUpStatus: c.followUpStatus || 'pending'
+            };
+        });
 
-        res.json(uniqueContacts);
+        // Remove duplicates and merge details
+        const uniqueContactsMap = {};
+        contacts.forEach(c => {
+            if (uniqueContactsMap[c.phone]) {
+                const existing = uniqueContactsMap[c.phone];
+                // Keep the record that has more messages or a defined name
+                if (c.messages.length > existing.messages.length || (!existing.name.startsWith('+') && c.name.startsWith('+'))) {
+                    uniqueContactsMap[c.phone] = {
+                        ...c,
+                        phone: c.displayPhone // Use display formatted version
+                    };
+                }
+            } else {
+                uniqueContactsMap[c.phone] = {
+                    ...c,
+                    phone: c.displayPhone // Use display formatted version
+                };
+            }
+        });
+
+        res.json(Object.values(uniqueContactsMap));
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
