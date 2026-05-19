@@ -530,9 +530,23 @@ app.get('/api/client/:clientId/contacts', authenticateToken, async (req, res) =>
         const chats = await Chat.find({ clientId: req.params.clientId }) || [];
         const contacts = chats.map(c => ({
             phone: c.customerPhone,
-            // Try to find a name if any message or data has it, for now just phone
-            name: c.customerPhone,
-            lastMsgAt: c.lastUpdate
+            name: c.name || c.customerPhone,
+            email: c.email || '',
+            interestScore: c.interestScore || 0,
+            status: c.intentAnalysis || 'New',
+            lastMessage: c.messages && c.messages.length > 0 ? c.messages[c.messages.length - 1].text : '',
+            campaignSource: c.campaignSource || '',
+            createdAt: c.messages && c.messages.length > 0 ? c.messages[0].timestamp : c.lastUpdate,
+            lastUpdate: c.lastUpdate,
+            conversionStatus: c.conversionStatus || 'not_converted',
+            tags: c.tags || [],
+            summary: c.summary || '',
+            notes: c.notes || '',
+            messages: c.messages || [],
+            botPaused: c.botPaused || false,
+            handoverActive: c.handoverActive || false,
+            reminderStatus: c.reminderStatus || 'none',
+            followUpStatus: c.followUpStatus || 'pending'
         }));
 
         // Remove duplicates
@@ -540,6 +554,27 @@ app.get('/api/client/:clientId/contacts', authenticateToken, async (req, res) =>
             .map(phone => contacts.find(c => c.phone === phone));
 
         res.json(uniqueContacts);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/client/:id/chats/:phone/update', authenticateToken, async (req, res) => {
+    try {
+        const { notes, conversionStatus } = req.body;
+        const updateFields = {};
+        if (notes !== undefined) updateFields.notes = notes;
+        if (conversionStatus !== undefined) updateFields.conversionStatus = conversionStatus;
+
+        const chat = await Chat.findOneAndUpdate(
+            { clientId: req.params.id, customerPhone: req.params.phone },
+            { $set: updateFields },
+            { new: true }
+        );
+        if (!chat) return res.status(404).json({ error: 'Chat not found' });
+        
+        // Trigger sync to google sheets if realtime sync is active
+        triggerRealtimeSync(req.params.id, chat);
+
+        res.json({ success: true, chat });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
