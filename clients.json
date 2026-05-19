@@ -26,8 +26,16 @@
     "documents": [],
     "name": "Abha Jatav",
     "email": "abha@uwo24.com",
-    "password": "",
-    "_id": "1778218801097"
+    "password": "Abha2004",
+    "_id": "1778218801097",
+    "customFields": [
+      "Student Name",
+      "Parent Name",
+      "Class/Grade",
+      "Academic Year",
+      "Previous School",
+      "Notes"
+    ]
   },
   {
     "createdAt": "2026-05-09T05:25:59.871Z",
@@ -57,6 +65,12 @@
     "name": "abha",
     "email": "abhajatav18@gmail.com",
     "password": "Abha2004",
-    "_id": "1778871037529"
+    "_id": "1778871037529",
+    "customFields": [
+      "Patient Name",
+      "Appointment Date",
+      "Symptoms",
+      "Doctor Name"
+    ]
   }
 ]

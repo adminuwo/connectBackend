@@ -77,6 +77,12 @@ function formatLeadData(lead) {
     const lastMsg = lead.messages && lead.messages.length > 0 ? lead.messages.filter(m => m.sender === 'customer').pop()?.text : '';
     const botMsg = lead.messages && lead.messages.length > 0 ? lead.messages.filter(m => m.sender === 'bot').pop()?.text : '';
     
+    const customFieldsObj = (lead.customFields instanceof Map)
+        ? Object.fromEntries(lead.customFields)
+        : (lead.customFields && typeof lead.customFields.toObject === 'function')
+            ? lead.customFields.toObject()
+            : (lead.customFields || {});
+
     return {
         phone: lead.phone || lead.customerPhone || '',
         name: lead.name || lead.customerPhone || '',
@@ -97,7 +103,8 @@ function formatLeadData(lead) {
         conversionStatus: lead.conversionStatus || 'not_converted',
         messageCount: lead.messageCount !== undefined ? lead.messageCount : (lead.messages ? lead.messages.length : 0),
         language: lead.language || 'English',
-        notes: lead.notes || ''
+        notes: lead.notes || '',
+        ...customFieldsObj
     };
 }
 

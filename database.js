@@ -42,6 +42,7 @@ const ClientSchema = new mongoose.Schema({
     botRules: { type: String, default: '' },
     botTriggerKeywords: { type: [String], default: [] },
     documents: [String],
+    customFields: { type: [String], default: [] },
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -81,7 +82,8 @@ const ChatSchema = new mongoose.Schema({
     conversionStatus: { type: String, default: "not_converted" },
     messageCount: { type: Number, default: 0 },
     language: { type: String, default: "English" },
-    notes: { type: String, default: "" }
+    notes: { type: String, default: "" },
+    customFields: { type: Map, of: String, default: {} }
 });
 
 const CampaignSchema = new mongoose.Schema({
@@ -215,7 +217,7 @@ class MockModel {
         let data = jsonDb.read(this.fileName);
         const index = data.findIndex(item => item._id === id || item.id === id);
         if (index !== -1) {
-            data[index] = { ...data[index], ...update };
+            data[index] = this._applyUpdateOperators(data[index], update);
             jsonDb.write(this.fileName, data);
             return data[index];
         }
@@ -228,16 +230,56 @@ class MockModel {
             return Object.entries(query).every(([key, value]) => item[key] === value);
         });
         if (index !== -1) {
-            data[index] = { ...data[index], ...update };
+            data[index] = this._applyUpdateOperators(data[index], update);
             jsonDb.write(this.fileName, data);
             return data[index];
         } else if (options.upsert) {
-            const newItem = { _id: Date.now().toString(), ...query, ...update };
-            data.push(newItem);
+            const newItem = { _id: Date.now().toString(), ...query };
+            const updatedItem = this._applyUpdateOperators(newItem, update);
+            data.push(updatedItem);
             jsonDb.write(this.fileName, data);
-            return newItem;
+            return updatedItem;
         }
         return null;
+    }
+
+    _applyUpdateOperators(item, update) {
+        let copy = { ...item };
+        
+        // 1. Handle $set
+        if (update.$set) {
+            copy = { ...copy, ...update.$set };
+        }
+        
+        // 2. Handle $inc
+        if (update.$inc) {
+            for (const [key, val] of Object.entries(update.$inc)) {
+                copy[key] = (Number(copy[key]) || 0) + Number(val);
+            }
+        }
+        
+        // 3. Handle $push
+        if (update.$push) {
+            for (const [key, val] of Object.entries(update.$push)) {
+                if (!Array.isArray(copy[key])) {
+                    copy[key] = [];
+                }
+                if (val && val.$each) {
+                    copy[key].push(...val.$each);
+                } else {
+                    copy[key].push(val);
+                }
+            }
+        }
+        
+        // 4. Handle other non-operator properties directly if any
+        for (const [key, val] of Object.entries(update)) {
+            if (!key.startsWith('$')) {
+                copy[key] = val;
+            }
+        }
+        
+        return copy;
     }
 
     async findByIdAndDelete(id) {

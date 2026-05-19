@@ -20,7 +20,14 @@
     "botPaused": false,
     "clientId": "1778218801097",
     "customerPhone": "+918359890909",
-    "_id": "1778660451655"
+    "_id": "1778660451655",
+    "notes": "Test note with custom fields",
+    "customFields": {
+      "Patient Name": "John Doe",
+      "Appointment Date": "2026-06-01",
+      "Symptoms": "Fever & Cough",
+      "Doctor Name": "Dr. House"
+    }
   },
   {
     "createdAt": "2026-05-18T07:47:04.705Z",

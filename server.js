@@ -572,13 +572,29 @@ app.get('/api/client/:clientId/contacts', authenticateToken, async (req, res) =>
             }
             const displayPhone = normalizedPhone.match(/^\d+$/) ? '+' + normalizedPhone : (rawPhone.startsWith('+') ? rawPhone : '+' + rawPhone);
 
+            // Dynamic Cold status check
+            const msSinceLastUpdate = Date.now() - new Date(c.lastUpdate || 0).getTime();
+            let finalStatus = c.intentAnalysis || 'New';
+            if (msSinceLastUpdate > 24 * 3600 * 1000) {
+                const msgs = c.messages || [];
+                if (msgs.length > 0 && (msgs[msgs.length - 1].sender === 'bot' || msgs[msgs.length - 1].sender === 'workflow')) {
+                    finalStatus = 'Cold';
+                }
+            }
+
+            const cFields = (c.customFields instanceof Map)
+                ? Object.fromEntries(c.customFields)
+                : (c.customFields && typeof c.customFields.toObject === 'function')
+                    ? c.customFields.toObject()
+                    : (c.customFields || {});
+
             return {
                 phone: normalizedPhone,
                 displayPhone: displayPhone,
                 name: c.name || displayPhone,
                 email: c.email || '',
                 interestScore: c.interestScore || 0,
-                status: c.intentAnalysis || 'New',
+                status: finalStatus,
                 lastMessage: c.messages && c.messages.length > 0 ? c.messages[c.messages.length - 1].text : '',
                 campaignSource: c.campaignSource || '',
                 createdAt: c.createdAt || (c.messages && c.messages.length > 0 ? c.messages[0].timestamp : c.lastUpdate),
@@ -591,7 +607,8 @@ app.get('/api/client/:clientId/contacts', authenticateToken, async (req, res) =>
                 botPaused: c.botPaused || false,
                 handoverActive: c.handoverActive || false,
                 reminderStatus: c.reminderStatus || 'none',
-                followUpStatus: c.followUpStatus || 'pending'
+                followUpStatus: c.followUpStatus || 'pending',
+                customFields: cFields
             };
         });
 
@@ -621,10 +638,11 @@ app.get('/api/client/:clientId/contacts', authenticateToken, async (req, res) =>
 
 app.post('/api/client/:id/chats/:phone/update', authenticateToken, async (req, res) => {
     try {
-        const { notes, conversionStatus } = req.body;
+        const { notes, conversionStatus, customFields } = req.body;
         const updateFields = {};
         if (notes !== undefined) updateFields.notes = notes;
         if (conversionStatus !== undefined) updateFields.conversionStatus = conversionStatus;
+        if (customFields !== undefined) updateFields.customFields = customFields;
 
         const chat = await Chat.findOneAndUpdate(
             { clientId: req.params.id, customerPhone: req.params.phone },
@@ -930,6 +948,39 @@ app.post('/api/client/:id/sheets/:sheetId/export', authenticateToken, async (req
         res.json({ success: true, exportedCount });
     } catch (err) {
         console.error('❌ [EXPORT LEADS API ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- CUSTOM FIELDS CONFIGURATION ---
+// 1. Get Client custom fields list
+app.get('/api/client/:id/custom-fields', authenticateToken, async (req, res) => {
+    try {
+        const client = await Client.findById(req.params.id);
+        if (!client) return res.status(404).json({ error: 'Client not found.' });
+        res.json({ customFields: client.customFields || [] });
+    } catch (err) {
+        console.error('❌ [GET CUSTOM FIELDS ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 2. Update Client custom fields list
+app.post('/api/client/:id/custom-fields', authenticateToken, async (req, res) => {
+    try {
+        const { customFields } = req.body;
+        if (!Array.isArray(customFields)) {
+            return res.status(400).json({ error: 'customFields must be an array of field names.' });
+        }
+        const client = await Client.findByIdAndUpdate(
+            req.params.id,
+            { $set: { customFields } },
+            { new: true }
+        );
+        if (!client) return res.status(404).json({ error: 'Client not found.' });
+        res.json({ success: true, customFields: client.customFields });
+    } catch (err) {
+        console.error('❌ [UPDATE CUSTOM FIELDS ERROR]', err.message);
         res.status(500).json({ error: err.message });
     }
 });
