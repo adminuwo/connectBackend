@@ -725,7 +725,11 @@ app.post('/api/client/:id/sheets/validate', authenticateToken, async (req, res) 
         const { url } = req.body;
         if (!url) return res.status(400).json({ error: 'Google Sheet URL is required.' });
 
-        const structure = await sheetsHelper.validateAndFetchStructure(url);
+        // Fetch client custom fields to auto-initialize sheet if empty
+        const client = await Client.findById(req.params.id);
+        const customFields = client ? (client.customFields || []) : [];
+
+        const structure = await sheetsHelper.validateAndFetchStructure(url, customFields);
         res.json({
             success: true,
             spreadsheetId: structure.spreadsheetId,

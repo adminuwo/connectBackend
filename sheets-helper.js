@@ -30,9 +30,50 @@ function extractSpreadsheetId(url) {
 }
 
 /**
+ * Writes default headers and custom fields to the sheet if it is empty
+ */
+async function writeHeadersToSheet(spreadsheetId, tabName, customFields = []) {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const defaultHeaders = [
+        'Phone Number',
+        'Name',
+        'Email',
+        'Status',
+        'Interest Score',
+        'Last Message',
+        'Bot Reply',
+        'Campaign Source',
+        'Assigned Agent',
+        'Follow-up Status',
+        'Reminder Status',
+        'Last Active Time',
+        'Lead Created Time',
+        'Tags',
+        'Summary',
+        'AI Intent',
+        'Conversion Status',
+        'Message Count',
+        'Language',
+        'Notes'
+    ];
+    
+    // Add custom fields
+    const headers = [...defaultHeaders, ...customFields];
+
+    await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `${tabName}!A1`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [headers] }
+    });
+
+    return headers;
+}
+
+/**
  * Validates a sheet and returns its tab names & column headers of the first tab
  */
-async function validateAndFetchStructure(spreadsheetUrlOrId) {
+async function validateAndFetchStructure(spreadsheetUrlOrId, customFields = []) {
     const spreadsheetId = extractSpreadsheetId(spreadsheetUrlOrId);
     if (!spreadsheetId) throw new Error('Invalid Google Sheet URL or Spreadsheet ID.');
 
@@ -53,7 +94,12 @@ async function validateAndFetchStructure(spreadsheetUrlOrId) {
             range
         });
 
-        const headers = valuesResponse.data.values ? valuesResponse.data.values[0] : [];
+        let headers = valuesResponse.data.values ? valuesResponse.data.values[0] : [];
+
+        // If the sheet has no headers/columns, initialize them automatically
+        if (headers.length === 0) {
+            headers = await writeHeadersToSheet(spreadsheetId, defaultTab, customFields);
+        }
 
         return {
             spreadsheetId,
