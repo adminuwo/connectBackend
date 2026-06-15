@@ -9,6 +9,8 @@ const axios = require('axios');
 const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const { OAuth2Client } = require('google-auth-library');
+const googleOAuthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-dev-only';
 
@@ -336,6 +338,69 @@ app.post('/api/auth/reset-password', async (req, res) => {
     } catch (err) {
         console.error('❌ [RESET ERROR]', err.message);
         res.status(500).json({ error: 'Failed to reset password.' });
+    }
+});
+
+// --- GOOGLE OAUTH ROUTE ---
+app.post('/api/auth/google', async (req, res) => {
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ error: 'Google credential missing.' });
+    try {
+        // Verify Google ID token
+        const ticket = await googleOAuthClient.verifyIdToken({
+            idToken: credential,
+            audience: process.env.GOOGLE_CLIENT_ID
+        });
+        const payload = ticket.getPayload();
+        const { email, name, sub: googleId } = payload;
+        const normalizedEmail = email.toLowerCase().trim();
+
+        console.log(`🔵 [GOOGLE LOGIN] Attempt: ${normalizedEmail}`);
+
+        // Check if user exists
+        let client = await Client.findOne({ email: normalizedEmail });
+
+        if (!client) {
+            // Auto-register with pending status
+            client = new Client({
+                name: name || normalizedEmail.split('@')[0],
+                email: normalizedEmail,
+                password: `google_oauth_${googleId}`,
+                status: 'pending',
+                googleId
+            });
+            await client.save();
+            console.log(`📝 [GOOGLE] New user registered: ${normalizedEmail}`);
+            return res.status(201).json({
+                success: false,
+                error: 'Account created! Awaiting admin approval. You will be notified via email.'
+            });
+        }
+
+        // Check account status
+        if (client.role !== 'admin' && client.status !== 'approved') {
+            return res.status(403).json({ error: `Account ${client.status}. Please wait for admin approval.` });
+        }
+
+        // Issue JWT token
+        const token = jwt.sign(
+            { clientId: client._id || client.id, role: client.role || 'client', isAdmin: client.role === 'admin' },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        console.log(`✅ [GOOGLE] ${client.name} logged in via Google.`);
+        res.json({
+            success: true,
+            token,
+            clientId: client._id || client.id,
+            name: client.name,
+            role: client.role || 'client',
+            isAdmin: client.role === 'admin'
+        });
+    } catch (err) {
+        console.error('❌ [GOOGLE AUTH ERROR]', err.message);
+        res.status(401).json({ error: 'Google sign-in failed. Please try again.' });
     }
 });
 
