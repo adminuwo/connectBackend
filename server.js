@@ -709,23 +709,44 @@ app.post('/api/client/:id/chats/:phone/update', authenticateToken, async (req, r
         if (conversionStatus !== undefined) updateFields.conversionStatus = conversionStatus;
         if (customFields !== undefined) updateFields.customFields = customFields;
 
-        const chat = await Chat.findOneAndUpdate(
-            { clientId: req.params.id, customerPhone: req.params.phone },
+        const phone = req.params.phone;
+        let chat = await Chat.findOne({ clientId: req.params.id, customerPhone: phone });
+        if (!chat) {
+            chat = await Chat.findOne({ clientId: req.params.id, customerPhone: '+' + phone });
+        }
+        if (!chat && phone.startsWith('+')) {
+            chat = await Chat.findOne({ clientId: req.params.id, customerPhone: phone.slice(1) });
+        }
+
+        if (!chat) return res.status(404).json({ error: 'Chat not found' });
+
+        const updatedChat = await Chat.findOneAndUpdate(
+            { clientId: req.params.id, customerPhone: chat.customerPhone },
             { $set: updateFields },
             { new: true }
         );
-        if (!chat) return res.status(404).json({ error: 'Chat not found' });
         
         // Trigger sync to google sheets if realtime sync is active
-        triggerRealtimeSync(req.params.id, chat);
+        triggerRealtimeSync(req.params.id, updatedChat);
 
-        res.json({ success: true, chat });
+        res.json({ success: true, chat: updatedChat });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/client/:id/chats/:phone', authenticateToken, async (req, res) => {
     try {
-        await Chat.deleteOne({ clientId: req.params.id, customerPhone: req.params.phone });
+        const phone = req.params.phone;
+        let chat = await Chat.findOne({ clientId: req.params.id, customerPhone: phone });
+        if (!chat) {
+            chat = await Chat.findOne({ clientId: req.params.id, customerPhone: '+' + phone });
+        }
+        if (!chat && phone.startsWith('+')) {
+            chat = await Chat.findOne({ clientId: req.params.id, customerPhone: phone.slice(1) });
+        }
+
+        if (chat) {
+            await Chat.deleteOne({ clientId: req.params.id, customerPhone: chat.customerPhone });
+        }
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
