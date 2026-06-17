@@ -443,7 +443,7 @@ app.get('/api/client/:id', authenticateToken, async (req, res) => {
 app.post('/api/client/:id/config', authenticateToken, async (req, res) => {
     try {
         const { whatsappNumber, apiKey } = req.body;
-        await Client.findByIdAndUpdate(req.params.id, { whatsappNumber, apiKey });
+        await Client.findByIdAndUpdate(req.params.id, { whatsappNumber, apiKey, botEnabled: true });
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
