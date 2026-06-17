@@ -13,21 +13,49 @@
         "text": "Hello, please help me",
         "msgType": "text",
         "mediaUrl": ""
+      },
+      {
+        "sender": "customer",
+        "text": "What are your services?",
+        "msgType": "text",
+        "mediaUrl": ""
+      },
+      {
+        "sender": "customer",
+        "text": "What are your services?",
+        "msgType": "text",
+        "mediaUrl": ""
       }
     ],
     "status": "open",
-    "lastUpdate": "2026-05-13T08:31:42.902Z",
+    "lastUpdate": "2026-06-17T07:02:52.293Z",
     "botPaused": false,
+    "name": "",
+    "email": "",
+    "interestScore": 0,
+    "botReply": "",
+    "campaignSource": "",
+    "assignedAgent": "",
+    "followUpStatus": "pending",
+    "reminderStatus": "none",
+    "tags": [],
+    "summary": "",
+    "intentAnalysis": "Pending",
+    "conversionStatus": "not_converted",
+    "messageCount": 0,
+    "language": "English",
+    "notes": "Test note with custom fields",
     "clientId": "1778218801097",
     "customerPhone": "+918359890909",
     "_id": "1778660451655",
-    "notes": "Test note with custom fields",
     "customFields": {
       "Patient Name": "John Doe",
       "Appointment Date": "2026-06-01",
       "Symptoms": "Fever & Cough",
       "Doctor Name": "Dr. House"
-    }
+    },
+    "handoverActive": true,
+    "handoverExpiresAt": "2026-06-17T07:07:52.292Z"
   },
   {
     "createdAt": "2026-05-18T07:47:04.705Z",

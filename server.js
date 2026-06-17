@@ -1716,7 +1716,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     
                     const cleanPhone = customerPhone.replace(/\+/g, '');
                     await AutoState.findOneAndUpdate(
-                        { clientId, customerPhone: cleanPhone, status: 'pending' },
+                        { clientId, customerPhone: customerPhone, status: 'pending' },
                         { status: 'completed', lastInteractionAt: new Date() }
                     );
                     
@@ -1877,7 +1877,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     const triggerKeywords = client.botTriggerKeywords || [];
                     const isTriggerKeyword = triggerKeywords.length > 0
                         ? triggerKeywords.some(k => currentTextLower.includes(k.toLowerCase()))
-                        : false; // Removed hardcoded 'ask anything' fallback
+                        : true; // If no keywords configured, default to true so the bot triggers live on any message
 
                     // 1. Process Automation Stages First (to advance stage and cancel previous reminders!)
                     const activeAuto = await AutoState.findOne({ clientId, customerPhone: customerPhone, status: 'pending' });
@@ -1933,21 +1933,21 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                     if (isBotSessionActive || isTriggerKeyword) {
                         const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000);
                         if (isTriggerKeyword) {
-                            console.log(`🚨 [GATE] Trigger keyword detected. Starting/Refreshing 5m AI session for ${cleanPhone}`);
+                            console.log(`🚨 [GATE] Trigger keyword detected. Starting/Refreshing 5m AI session for ${customerPhone}`);
                             await Chat.findOneAndUpdate(
-                                { clientId, customerPhone: cleanPhone },
+                                { clientId, customerPhone: customerPhone },
                                 { handoverActive: true, handoverExpiresAt: fiveMinutesFromNow },
                                 { upsert: true }
                             );
                             // Complete any pending automation if trigger keyword was explicitly typed
                             await AutoState.findOneAndUpdate(
-                                { clientId, customerPhone: cleanPhone, status: 'pending' },
+                                { clientId, customerPhone: customerPhone, status: 'pending' },
                                 { status: 'completed', lastInteractionAt: new Date() }
                             );
                         } else if (isBotSessionActive) {
-                            console.log(`🤖 [GATE] AI session active. Extending for 5m for ${cleanPhone}`);
+                            console.log(`🤖 [GATE] AI session active. Extending for 5m for ${customerPhone}`);
                             await Chat.findOneAndUpdate(
-                                { clientId, customerPhone: cleanPhone },
+                                { clientId, customerPhone: customerPhone },
                                 { handoverExpiresAt: fiveMinutesFromNow }
                             );
                         }
@@ -1987,8 +1987,8 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 if (keywords.length > 0) {
                     isTriggered = keywords.some(k => currentText.includes(k.toLowerCase()));
                 } else {
-                    // Strictly wait for "ask anything" if no keywords are configured
-                    isTriggered = currentText.includes('ask anything');
+                    // If no keywords configured, default to true so the bot triggers live on any message
+                    isTriggered = true;
                 }
 
                 if (!isTriggered) {

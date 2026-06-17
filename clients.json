@@ -35,7 +35,9 @@
       "Academic Year",
       "Previous School",
       "Notes"
-    ]
+    ],
+    "botRules": "",
+    "botTriggerKeywords": []
   },
   {
     "createdAt": "2026-05-09T05:25:59.871Z",
