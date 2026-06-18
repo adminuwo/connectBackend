@@ -129,11 +129,22 @@ function formatLeadData(lead) {
             ? lead.customFields.toObject()
             : (lead.customFields || {});
 
+    // Compute status in alignment with CRM contacts list
+    const msSinceLastUpdate = Date.now() - new Date(lead.lastUpdate || 0).getTime();
+    let finalStatus = lead.status || lead.intentAnalysis || 'New';
+    if (msSinceLastUpdate > 24 * 3600 * 1000) {
+        const msgs = lead.messages || [];
+        if (msgs.length > 0 && (msgs[msgs.length - 1].sender === 'bot' || msgs[msgs.length - 1].sender === 'workflow')) {
+            
+            finalStatus = 'Cold';
+        }
+    }
+
     return {
         phone: lead.phone || lead.customerPhone || '',
         name: lead.name || lead.customerPhone || '',
         email: lead.email || '',
-        status: lead.status || (lead.botPaused ? 'paused' : 'active'),
+        status: finalStatus,
         interestScore: lead.interestScore !== undefined ? lead.interestScore : 0,
         lastMessage: lead.lastMessage || lastMsg || '',
         botReply: lead.botReply || botMsg || '',

@@ -1374,7 +1374,7 @@ app.all('/api/client/:clientId/handover/:phone/:action', async (req, res) => {
                     const chatHistory = chat ? chat.messages.slice(-5).map(m => ({ sender: m.sender, text: m.text })) : [];
 
                     // Trigger RAG with a "handover" context
-                    const ragResponse = await rag.query(clientId, "The customer has just handed over control to you. Greet them and ask how you can help.", chatHistory, client.name);
+                    const ragResponse = await rag.query(clientId, "The customer has just handed over control to you. Greet them and ask how you can help.", chatHistory, client.name, client.botRules || '', client.botWelcomeMessage || '');
 
                     if (ragResponse.text) {
                         await axios.post(
@@ -1708,7 +1708,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                             text: m.text
                         }));
                         
-                        const ragResponse = await rag.query(clientId, 'hello', chatHistory, client.name, client.botRules);
+                        const ragResponse = await rag.query(clientId, 'hello', chatHistory, client.name, client.botRules || '', client.botWelcomeMessage || '');
                         let response = ragResponse.text.trim();
                         const imageUrl = ragResponse.imageUrl;
                         
@@ -2140,7 +2140,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
 
                 // --- AI PROCESSING (RAG BASED) ---
 
-                const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory, client.name, client.botRules);
+                const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory, client.name, client.botRules || '', client.botWelcomeMessage || '');
 
                 // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
                 let response = ragResponse.text.trim();
@@ -2294,6 +2294,7 @@ app.get('/api/client/:id/bot-config', authenticateToken, async (req, res) => {
         if (!client) return res.status(404).json({ error: 'Client not found' });
         res.json({
             botRules: client.botRules || '',
+            botWelcomeMessage: client.botWelcomeMessage || '',
             botTriggerKeywords: client.botTriggerKeywords || []
         });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2301,9 +2302,10 @@ app.get('/api/client/:id/bot-config', authenticateToken, async (req, res) => {
 
 app.post('/api/client/:id/bot-config', authenticateToken, async (req, res) => {
     try {
-        const { botRules, botTriggerKeywords } = req.body;
+        const { botRules, botWelcomeMessage, botTriggerKeywords } = req.body;
         await Client.findByIdAndUpdate(req.params.id, {
             botRules,
+            botWelcomeMessage,
             botTriggerKeywords
         });
         res.json({ success: true });

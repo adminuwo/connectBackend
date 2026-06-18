@@ -275,7 +275,7 @@ class SimpleRAG {
         }
     }
 
-    async query(clientId, userQuery, chatHistory = [], clientName = "AISA Connect", botRules = "") {
+    async query(clientId, userQuery, chatHistory = [], clientName = "AISA Connect", botRules = "", botWelcomeMessage = "") {
         if (!this.openai) return { text: "I'm sorry, my AI features are currently offline." };
         
         try {
@@ -289,6 +289,10 @@ class SimpleRAG {
             const isFarewell = farewells.some(f => lowerQuery === f || lowerQuery.startsWith(f + ' '));
 
             if (isGreeting || isFarewell) {
+                if (isGreeting && botWelcomeMessage && botWelcomeMessage.trim().length > 0) {
+                    return { text: botWelcomeMessage.trim() };
+                }
+
                 const prompt = isGreeting 
                     ? `Greet the user warmly as a senior professional representative of ${clientName}. Mention that you are their dedicated AI Assistant and can help with any business inquiries using official records. Tone: Professional & Welcoming.`
                     : "Politely say goodbye or you're welcome. Encourage them to reach out again if they need further assistance. Tone: Professional & Courteous.";
