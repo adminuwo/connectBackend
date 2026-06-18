@@ -942,17 +942,8 @@ app.post('/api/client/:id/sheets/:sheetId/sync', authenticateToken, async (req, 
         // Loop and sync
         let syncedCount = 0;
         for (const chat of chats) {
-            const lastMsg = chat.messages[chat.messages.length - 1];
-            const leadData = {
-                name: chat.customerPhone,
-                phone: chat.customerPhone,
-                status: chat.botPaused ? 'paused' : 'active',
-                lastMessage: lastMsg ? lastMsg.text : '',
-                assignedAgent: chat.botPaused ? 'Agent' : 'Bot'
-            };
-            
             try {
-                const synced = await sheetsHelper.syncRow(connection, leadData);
+                const synced = await sheetsHelper.syncRow(connection, chat);
                 if (synced) syncedCount++;
             } catch (rowErr) {
                 console.warn(`[MANUAL SYNC ROW ERROR] Lead: ${chat.customerPhone}`, rowErr.message);
@@ -1016,18 +1007,7 @@ app.post('/api/client/:id/sheets/:sheetId/export', authenticateToken, async (req
         if (!connection) return res.status(404).json({ error: 'Sheet connection not found.' });
 
         const chats = await Chat.find({ clientId }) || [];
-        const leadsArray = chats.map(c => {
-            const lastMsg = c.messages[c.messages.length - 1];
-            return {
-                name: c.customerPhone,
-                phone: c.customerPhone,
-                status: c.botPaused ? 'paused' : 'active',
-                lastMessage: lastMsg ? lastMsg.text : '',
-                assignedAgent: c.botPaused ? 'Agent' : 'Bot'
-            };
-        });
-
-        const exportedCount = await sheetsHelper.exportLeadsToSheet(connection, leadsArray);
+        const exportedCount = await sheetsHelper.exportLeadsToSheet(connection, chats);
 
         // Update stats
         await GoogleSheet.findByIdAndUpdate(sheetId, {

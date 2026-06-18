@@ -187,15 +187,21 @@ class MockModel {
         this.ModelName = ModelName;
     }
 
+    _getNestedValue(obj, path) {
+        if (!path || !obj) return undefined;
+        return path.split('.').reduce((acc, part) => acc && acc[part], obj);
+    }
+
     async find(query = {}) {
         let data = jsonDb.read(this.fileName);
         if (Object.keys(query).length > 0) {
             return data.filter(item => {
                 return Object.entries(query).every(([key, value]) => {
+                    const itemValue = key.includes('.') ? this._getNestedValue(item, key) : item[key];
                     if (value && typeof value === 'object' && value.$lte) {
-                        return new Date(item[key]) <= new Date(value.$lte);
+                        return new Date(itemValue) <= new Date(value.$lte);
                     }
-                    return item[key] === value;
+                    return itemValue === value;
                 });
             });
         }
@@ -227,7 +233,10 @@ class MockModel {
     async findOneAndUpdate(query, update, options = {}) {
         let data = jsonDb.read(this.fileName);
         const index = data.findIndex(item => {
-            return Object.entries(query).every(([key, value]) => item[key] === value);
+            return Object.entries(query).every(([key, value]) => {
+                const itemValue = key.includes('.') ? this._getNestedValue(item, key) : item[key];
+                return itemValue === value;
+            });
         });
         if (index !== -1) {
             data[index] = this._applyUpdateOperators(data[index], update);
@@ -292,7 +301,10 @@ class MockModel {
     async deleteOne(query) {
         let data = jsonDb.read(this.fileName);
         const index = data.findIndex(item => {
-            return Object.entries(query).every(([key, value]) => item[key] === value);
+            return Object.entries(query).every(([key, value]) => {
+                const itemValue = key.includes('.') ? this._getNestedValue(item, key) : item[key];
+                return itemValue === value;
+            });
         });
         if (index !== -1) {
             data.splice(index, 1);
@@ -309,8 +321,9 @@ class MockModel {
         let data = jsonDb.read(this.fileName);
         const filtered = data.filter(item => {
             return !Object.entries(query).every(([key, value]) => {
-                if (typeof value === 'object' && value.$ne) return item[key] !== value.$ne;
-                return item[key] === value;
+                const itemValue = key.includes('.') ? this._getNestedValue(item, key) : item[key];
+                if (typeof value === 'object' && value.$ne) return itemValue !== value.$ne;
+                return itemValue === value;
             });
         });
         const deletedCount = data.length - filtered.length;
