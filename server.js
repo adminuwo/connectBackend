@@ -1455,15 +1455,18 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                     if (automation && automation.stages && automation.stages.length > 0) {
                         const firstStage = automation.stages[0];
                         
+                        let initialMessageToSend = personalizedMsg;
                         // If no message was provided in bulk, use the flow's first stage message
-                        if (!personalizedMsg && firstStage.message && firstStage.message.text) {
-                            personalizedMsg = firstStage.message.text;
-                            
+                        if (!initialMessageToSend && firstStage.message && firstStage.message.text) {
+                            initialMessageToSend = firstStage.message.text;
+                        }
+
+                        if (initialMessageToSend) {
                             // Send this initial flow message
                             const textPayload = {
                                 fullPhoneNumber: apiPhone,
                                 type: 'Text',
-                                data: { message: personalizedMsg }
+                                data: { message: initialMessageToSend }
                             };
                             await axios.post('https://api.interakt.ai/v1/public/message/', textPayload, {
                                 headers: { 'Authorization': `Basic ${authKey}`, 'Content-Type': 'application/json' }
@@ -1475,7 +1478,7 @@ app.post('/api/client/:id/bulk-send', authenticateToken, async (req, res) => {
                                 let activeChat = chat || new Chat({ clientId: id, customerPhone: phone, messages: [], lastUpdate: new Date() });
                                 activeChat.messages.push({
                                     sender: 'workflow',
-                                    text: personalizedMsg,
+                                    text: initialMessageToSend,
                                     msgType: 'text',
                                     timestamp: new Date()
                                 });
