@@ -1960,6 +1960,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             const now = new Date();
             const isPersistentActive = activeChat && activeChat.handoverActive && activeChat.handoverExpiresAt && new Date(activeChat.handoverExpiresAt) > now;
 
+            let sessionJustStarted = false;
             if (!isPersistentActive) {
                 const currentText = text.toLowerCase();
                 const keywords = client.botTriggerKeywords || [];
@@ -1980,6 +1981,7 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
                 }
 
                 console.log(`🚀 [GATE] Trigger detected! AI session started for 5 minutes.`);
+                sessionJustStarted = true;
                 
                 // Set Persistent State (5 Minute Timeout)
                 if (activeChat) {
@@ -2129,26 +2131,33 @@ app.post('/webhook/interakt/:clientId', async (req, res) => {
             
             // Only proceed with AI if session is active (started by trigger word)
             if (openai && isBotSessionActiveFinal) {
-                console.log(`🧠 [AI] Processing: ${text}`);
-                console.time(`🔍 [RAG+AI] ${customerPhone}`);
+                let response = "";
+                let imageUrl = "";
 
-                // Normalize query
-                const normalizedQuery = text.toLowerCase().trim().replace(/\s+/g, ' ');
+                if (sessionJustStarted && client.botWelcomeMessage && client.botWelcomeMessage.trim()) {
+                    response = client.botWelcomeMessage.trim();
+                    console.log(`👋 [GREETING] Sending welcome message directly for first trigger: "${response}"`);
+                } else {
+                    console.log(`🧠 [AI] Processing: ${text}`);
+                    console.time(`🔍 [RAG+AI] ${customerPhone}`);
 
-                // Get last 5 messages for context awareness
-                const chatHistory = activeChat.messages.slice(-5).map(m => ({
-                    sender: m.sender,
-                    text: m.text
-                }));
+                    // Normalize query
+                    const normalizedQuery = text.toLowerCase().trim().replace(/\s+/g, ' ');
 
-                // --- AI PROCESSING (RAG BASED) ---
+                    // Get last 5 messages for context awareness
+                    const chatHistory = activeChat.messages.slice(-5).map(m => ({
+                        sender: m.sender,
+                        text: m.text
+                    }));
 
-                const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory, client.name, client.botRules || '', client.botWelcomeMessage || '');
+                    // --- AI PROCESSING (RAG BASED) ---
+                    const ragResponse = await rag.query(clientId, normalizedQuery, chatHistory, client.name, client.botRules || '', client.botWelcomeMessage || '');
 
-                // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
-                let response = ragResponse.text.trim();
-                const imageUrl = ragResponse.imageUrl;
-                console.timeEnd(`🔍 [RAG+AI] ${customerPhone}`);
+                    // CLEAN RESPONSE: Strict plain-text formatting for WhatsApp
+                    response = ragResponse.text.trim();
+                    imageUrl = ragResponse.imageUrl;
+                    console.timeEnd(`🔍 [RAG+AI] ${customerPhone}`);
+                }
 
                 if (response || imageUrl) {
                     try {
