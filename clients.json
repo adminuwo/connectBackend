@@ -74,5 +74,21 @@
       "Symptoms",
       "Doctor Name"
     ]
+  },
+  {
+    "createdAt": "2026-06-20T12:06:00.000Z",
+    "status": "approved",
+    "isAdmin": false,
+    "whatsappNumber": "",
+    "apiKey": "",
+    "logoUrl": "",
+    "botEnabled": false,
+    "autoReplyRules": "",
+    "documents": [],
+    "name": "Devansh",
+    "email": "devansh@uwo24.com",
+    "password": "12345678",
+    "_id": "1778900000000",
+    "customFields": []
   }
 ]

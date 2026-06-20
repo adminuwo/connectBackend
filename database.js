@@ -182,6 +182,101 @@ const MongooseOTP = mongoose.model('OTP', OTPSchema);
 const MongooseGoogleSheet = mongoose.model('GoogleSheet', GoogleSheetSchema);
 
 // --- MOCK MODELS (For JSON) ---
+class MockQuery {
+    constructor(execFn, isArray = true) {
+        this.execFn = execFn;
+        this.isArray = isArray;
+        this.sortOption = null;
+        this.limitOption = null;
+        this.selectOption = null;
+    }
+
+    sort(opt) {
+        this.sortOption = opt;
+        return this;
+    }
+
+    limit(n) {
+        this.limitOption = n;
+        return this;
+    }
+
+    select(fields) {
+        this.selectOption = fields;
+        return this;
+    }
+
+    lean() {
+        return this;
+    }
+
+    async exec() {
+        let result = await this.execFn();
+        if (result === null || result === undefined) {
+            return null;
+        }
+
+        if (this.isArray) {
+            if (!Array.isArray(result)) {
+                result = [result];
+            }
+            
+            // Apply sorting
+            if (this.sortOption) {
+                const [key, dir] = Object.entries(this.sortOption)[0];
+                result.sort((a, b) => {
+                    const valA = a[key];
+                    const valB = b[key];
+                    if (valA < valB) return dir === -1 ? 1 : -1;
+                    if (valA > valB) return dir === -1 ? -1 : 1;
+                    return 0;
+                });
+            }
+
+            // Apply limit
+            if (this.limitOption !== null && this.limitOption !== undefined) {
+                result = result.slice(0, this.limitOption);
+            }
+        }
+
+        // Apply select (if fields is specified, e.g. 'name')
+        if (this.selectOption) {
+            const selectFields = typeof this.selectOption === 'string'
+                ? this.selectOption.split(' ').filter(Boolean)
+                : Object.keys(this.selectOption);
+
+            const project = (item) => {
+                if (!item) return item;
+                const projected = {};
+                selectFields.forEach(f => {
+                    if (f.startsWith('-')) {
+                        // ignore exclusion for simplicity in mock
+                    } else {
+                        projected[f] = item[f];
+                    }
+                });
+                projected._id = item._id;
+                projected.id = item.id;
+                if (item.save) projected.save = item.save;
+                if (item.toObject) projected.toObject = item.toObject;
+                return projected;
+            };
+
+            if (this.isArray) {
+                result = result.map(project);
+            } else {
+                result = project(result);
+            }
+        }
+
+        return result;
+    }
+
+    then(onFulfilled, onRejected) {
+        return this.exec().then(onFulfilled, onRejected);
+    }
+}
+
 class MockModel {
     constructor(fileName, ModelName) {
         this.fileName = fileName;
@@ -193,31 +288,37 @@ class MockModel {
         return path.split('.').reduce((acc, part) => acc && acc[part], obj);
     }
 
-    async find(query = {}) {
-        let data = jsonDb.read(this.fileName);
-        if (Object.keys(query).length > 0) {
-            return data.filter(item => {
-                return Object.entries(query).every(([key, value]) => {
-                    const itemValue = key.includes('.') ? this._getNestedValue(item, key) : item[key];
-                    if (value && typeof value === 'object' && value.$lte) {
-                        return new Date(itemValue) <= new Date(value.$lte);
-                    }
-                    return itemValue === value;
+    find(query = {}) {
+        return new MockQuery(async () => {
+            let data = jsonDb.read(this.fileName);
+            if (Object.keys(query).length > 0) {
+                data = data.filter(item => {
+                    return Object.entries(query).every(([key, value]) => {
+                        const itemValue = key.includes('.') ? this._getNestedValue(item, key) : item[key];
+                        if (value && typeof value === 'object' && value.$lte) {
+                            return new Date(itemValue) <= new Date(value.$lte);
+                        }
+                        return itemValue === value;
+                    });
                 });
-            });
-        }
-        return data;
+            }
+            return data.map(item => this.createInstance(item));
+        }, true);
     }
 
-    async findOne(query) {
-        const results = await this.find(query);
-        const item = results[0] || null;
-        return item ? this.createInstance(item) : null;
+    findOne(query) {
+        return new MockQuery(async () => {
+            const results = await this.find(query).exec();
+            return results[0] || null;
+        }, false);
     }
 
-    async findById(id) {
-        const data = jsonDb.read(this.fileName);
-        return data.find(item => item._id === id || item.id === id) || null;
+    findById(id) {
+        return new MockQuery(async () => {
+            const data = jsonDb.read(this.fileName);
+            const item = data.find(item => item._id === id || item.id === id) || null;
+            return item ? this.createInstance(item) : null;
+        }, false);
     }
 
     async findByIdAndUpdate(id, update) {
@@ -226,7 +327,7 @@ class MockModel {
         if (index !== -1) {
             data[index] = this._applyUpdateOperators(data[index], update);
             jsonDb.write(this.fileName, data);
-            return data[index];
+            return this.createInstance(data[index]);
         }
         return null;
     }
@@ -242,13 +343,13 @@ class MockModel {
         if (index !== -1) {
             data[index] = this._applyUpdateOperators(data[index], update);
             jsonDb.write(this.fileName, data);
-            return data[index];
+            return this.createInstance(data[index]);
         } else if (options.upsert) {
             const newItem = { _id: Date.now().toString(), ...query };
             const updatedItem = this._applyUpdateOperators(newItem, update);
             data.push(updatedItem);
             jsonDb.write(this.fileName, data);
-            return updatedItem;
+            return this.createInstance(updatedItem);
         }
         return null;
     }
@@ -372,26 +473,37 @@ class MockModel {
             defaults = { ...defaults, status: 'pending', nextReminderIndex: 0 };
         }
 
-        return {
+        const instance = {
             ...defaults,
             ...data,
             _id: data._id || Date.now().toString(),
-            save: async function() {
-                let dbData = jsonDb.read(fileName);
-                const index = dbData.findIndex(item => item._id === this._id);
-                
-                const savedItem = { ...this };
-                delete savedItem.save;
-                
-                if (index !== -1) {
-                    dbData[index] = savedItem;
-                } else {
-                    dbData.push(savedItem);
-                }
-                jsonDb.write(fileName, dbData);
-                return this;
-            }
         };
+
+        instance.toObject = function() {
+            const copy = { ...this };
+            delete copy.toObject;
+            delete copy.save;
+            return copy;
+        };
+
+        instance.save = async function() {
+            let dbData = jsonDb.read(fileName);
+            const index = dbData.findIndex(item => item._id === this._id);
+            
+            const savedItem = { ...this };
+            delete savedItem.save;
+            delete savedItem.toObject;
+            
+            if (index !== -1) {
+                dbData[index] = savedItem;
+            } else {
+                dbData.push(savedItem);
+            }
+            jsonDb.write(fileName, dbData);
+            return this;
+        };
+
+        return instance;
     }
 }
 
